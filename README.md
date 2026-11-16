@@ -48,7 +48,7 @@ Situação atual:
 
 | Fonte | Landing | Bronze | Silver | Gold |
 |---|:-:|:-:|:-:|:-:|
-| CEMADEN | ✅ | ✅ | ⏳ | ⏳ |
+| CEMADEN | ✅ | ✅ | ✅ | ✅ |
 | SIBH | ✅ | ✅ | ⏳ | ⏳ |
 | GeoSampa | ✅ | ✅ | ✅ | ✅ |
 
@@ -63,6 +63,7 @@ jobs/                                             # definição dos jobs do Data
 └── chuvasegura_sibh.job.yml
 src/
 ├── common/
+│   ├── conversoes.py                             # conversões de texto (datas, números, fuso) usadas nas Silvers
 │   ├── data_quality.py                           # regras e execução das etapas de qualidade de dados
 │   └── ingestion_log.py                          # log de ingestão padrão (módulo Python)
 ├── shared/
@@ -72,9 +73,19 @@ src/
 │   ├── ingestion/
 │   │   ├── 01_cemaden_stations_landing.py
 │   │   └── 01_cemaden_rainfall_readings_landing.py
-│   └── transformations/bronze/
-│       ├── 02_cemaden_stations_bronze.py
-│       └── 02_cemaden_rainfall_readings_bronze.py
+│   ├── quality/
+│   │   ├── 03_cemaden_silver_quality.py
+│   │   └── 05_cemaden_gold_quality.py
+│   └── transformations/
+│       ├── bronze/
+│       │   ├── 02_cemaden_stations_bronze.py
+│       │   └── 02_cemaden_rainfall_readings_bronze.py
+│       ├── silver/
+│       │   ├── 03_cemaden_stations_silver.py
+│       │   └── 03_cemaden_rainfall_readings_silver.py
+│       └── gold/
+│           ├── 04_dim_cemaden_stations.sql
+│           └── 05_fact_cemaden_rainfall_hourly.sql
 ├── sibh/
 │   ├── ingestion/
 │   │   ├── 01_sibh_stations_landing.py
@@ -103,7 +114,7 @@ Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` co
 ## Pré-requisitos
 
 1. **Workspace Databricks com Unity Catalog** e compute serverless ou um Databricks Runtime recente. O notebook da Gold do GeoSampa usa variáveis de sessão SQL e scripting SQL (`BEGIN … END`).
-2. **Repositório clonado como Git folder** (*Workspace → Create → Git folder*). Os notebooks importam os módulos de `src/common/` (log de ingestão e qualidade de dados) a partir da pasta do próprio notebook.
+2. **Repositório clonado como Git folder** (*Workspace → Create → Git folder*). Os notebooks importam os módulos de `src/common/` (log de ingestão, qualidade de dados e conversões) a partir da pasta do próprio notebook.
 3. **Catálogo e schemas:**
 
    ```sql
@@ -138,7 +149,7 @@ Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` co
 
 ### CEMADEN
 
-São dois fluxos independentes. Cada um tem a landing e depois a Bronze.
+O cadastro de estações e as leituras de chuva seguem em paralelo até a Silver. Daí em diante, a qualidade da Silver barra a Gold.
 
 | # | Notebook | Widgets |
 |---|---|---|
@@ -146,9 +157,18 @@ São dois fluxos independentes. Cada um tem a landing e depois a Bronze.
 | 2 | `02_cemaden_stations_bronze` | `snapshot_date`: `pending` (padrão), `latest`, `all` ou `AAAA-MM-DD` |
 | 1 | `01_cemaden_rainfall_readings_landing` | `modo`: `backfill` ou `incremental`; `mes_inicio` (201401); `mes_fim` (vazio = último mês fechado); `forcar_reprocesso`: `nao`/`sim` |
 | 2 | `02_cemaden_rainfall_readings_bronze` | (sem widgets: carrega os meses pendentes segundo o log) |
+| 3 | `03_cemaden_stations_silver` | (sem widgets: recria a Silver a partir de todos os snapshots) |
+| 3 | `03_cemaden_rainfall_readings_silver` | `window`: `pending` (padrão: meses recarregados na Bronze), `all` ou `AAAAMM` |
+| 3 | `03_cemaden_silver_quality` (pasta `quality/`) | (sem widgets) |
+| 4 | `04_dim_cemaden_stations` | (sem widgets) |
+| 5 | `05_fact_cemaden_rainfall_hourly` | (sem widgets: recarrega os meses novos ou alterados) |
+| 5 | `05_cemaden_gold_quality` (pasta `quality/`) | (sem widgets) |
 
 - A PED aceita 12 chamadas por minuto, então o primeiro backfill desde 2014 leva horas. Se parar no meio, basta rodar de novo: o notebook continua de onde parou.
 - Os cadastros (`*_stations_*`) são snapshots diários: rodar no mesmo dia substitui o snapshot do dia.
+- **Silver das estações:** uma linha por estação, com a versão do snapshot mais recente em que ela aparece. Estações que saíram do cadastro continuam na tabela (`fl_no_cadastro_atual = false`), para que as leituras antigas tenham estação.
+- **Silver das leituras:** `datahora` da fonte está em UTC e vira `dt_hr_leitura_utc`; `dt_leitura`, `nr_hora` e `cod_dim_data` são calculados no fuso de São Paulo. `valor` vira `nr_chuva_mm` (chuva em mm no intervalo da leitura). Leituras duplicadas (mesma estação, sensor e data e hora) ficam uma só, a da carga mais recente.
+- **Gold:** a fato `fact_cemaden_rainfall_hourly` tem uma linha por estação, sensor, dia e hora (fuso de São Paulo), com a chuva acumulada, a maior leitura e o número de leituras da hora. Hora sem leitura não tem linha. A carga é incremental por mês, com o mesmo controle de assinatura da fato do GeoSampa.
 
 ### SIBH
 
@@ -194,14 +214,21 @@ Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YA
 | Arquivo | Job | Agenda (America/Sao_Paulo) | Situação |
 |---|---|---|---|
 | `jobs/chuvasegura_geosampa.job.yml` | `ChuvaSegura` | todo dia às 09:00:30 | ativo |
-| `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | pausado até o backfill |
+| `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | ativo |
 | `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | pausado até o backfill |
 
 ```mermaid
 flowchart LR
   subgraph cemaden["ChuvaSegura - CEMADEN"]
-    C1[01_cemaden_stations_landing] --> C2[02_cemaden_stations_bronze]
-    C3[01_cemaden_rainfall_readings_landing<br/>modo = incremental] --> C4[02_cemaden_rainfall_readings_bronze]
+    C1[01_cemaden_stations_landing] --> C2[02_cemaden_stations_bronze] --> C5[03_cemaden_stations_silver]
+    C3[01_cemaden_rainfall_readings_landing<br/>modo = incremental] --> C4[02_cemaden_rainfall_readings_bronze] --> C6[03_cemaden_rainfall_readings_silver]
+    C5 --> CQ1{{03_cemaden_silver_quality}}
+    C6 --> CQ1
+    CQ1 --> C7[04_dim_cemaden_stations]
+    CQ1 --> C8[05_fact_cemaden_rainfall_hourly]
+    C7 --> C8
+    CT[00_dim_tempo] --> C8
+    C8 --> CQ2{{05_cemaden_gold_quality}}
   end
   subgraph sibh["ChuvaSegura - SIBH"]
     S1[01_sibh_stations_landing] --> S2[02_sibh_stations_bronze] --> S3[03_sibh_measurements_landing<br/>mode = incremental] --> S4[04_sibh_measurements_bronze]
@@ -281,7 +308,7 @@ As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como 
   - `AVISO`: só registra.
 - **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
 - **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
-- **Resultados:** ficam em `fiap_analytics.bronze.geosampa_data_quality_log`, uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log` e `fiap_analytics.bronze.cemaden_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
 
 Regras do GeoSampa:
 
@@ -289,6 +316,13 @@ Regras do GeoSampa:
 |---|---|---|
 | Silver | tabela não vazia; mesmas linhas da Bronze; ano e `nr_id_ocorrencia` preenchidos e únicos por ano; data preenchida e entre 2010 e hoje; SRID 31983; ponto dentro da área de São Paulo | `name` repetido no ano; data fora do ano do arquivo; mais de 1% sem coordenada ou sem subprefeitura; mais de 5% do tipo "Outros" |
 | Gold | fato não vazia; mesmas linhas da Silver por ano; ocorrência única; chaves existentes na `dim_tempo` e nas dimensões; ponto dentro da área; chaves únicas e membro `-1` nas dimensões; `dim_tempo` sem chave repetida nem dia faltando | mais de 1% das ocorrências com subprefeitura `-1`; ocorrências com tipo `-1` |
+
+Regras do CEMADEN:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | estações: tabela não vazia, código único, latitude e longitude preenchidas e dentro da área de São Paulo; leituras: tabela não vazia, uma linha por chave distinta da Bronze, estação, sensor e data e hora preenchidos, data entre 2010 e agora, chuva não negativa | mais de 1% das leituras com data e hora fora do mês pedido à API (confere a premissa de UTC); mais de 1% sem valor; leituras acima de 50 mm; mais de 1% de leituras de estações fora do cadastro |
+| Gold | fato não vazia; uma linha por estação, sensor, dia e hora; leituras e chuva iguais às da Silver em cada mês; chaves existentes na `dim_tempo` e na dimensão de estações; chuva da hora não negativa; chaves únicas e membro `-1` na dimensão | mais de 1% das horas com estação `-1`; horas acima de 120 mm |
 
 Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
 
@@ -310,20 +344,26 @@ ORDER BY executado_em DESC;
 | bronze | `geosampa_history_flooding_events` | Ocorrências do GeoSampa, com a geometria em WKB |
 | bronze | `geosampa_subprefecture_area` | Subprefeituras e agrupamentos (Anexo IX) |
 | bronze | `geosampa_data_quality_log` | Resultados das regras de qualidade do GeoSampa |
+| bronze | `cemaden_data_quality_log` | Resultados das regras de qualidade do CEMADEN |
+| silver | `cemaden_stations` | Estações do CEMADEN no município, uma linha por estação, tipadas |
+| silver | `cemaden_rainfall_readings` | Leituras de chuva tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
+| gold | `dim_cemaden_stations` | Dimensão de estações do CEMADEN, com o membro `-1` (não informado) |
+| gold | `fact_cemaden_rainfall_hourly` | Fato de chuva por estação, sensor, dia e hora |
 | gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras, com o membro `-1` (não informado) |
 | gold | `dim_geosampa_type_flooding_events` | Dimensão de tipos de ocorrência, com o membro `-1` (não informado) |
 | gold | `fact_geosampa_flooding_events` | Fato de ocorrências (uma linha por ocorrência) por data, tipo e subprefeitura, com latitude e longitude |
 
 ## Desenvolvimento
 
-- **Módulos de `src/common`:** depois de alterar `ingestion_log.py` ou `data_quality.py`, reinicie o Python do notebook (*Run → Restart Python*) para recarregar o módulo.
+- **Módulos de `src/common`:** depois de alterar `ingestion_log.py`, `data_quality.py` ou `conversoes.py`, reinicie o Python do notebook (*Run → Restart Python*) para recarregar o módulo.
 - **Fluxo de trabalho:** cada mudança vai numa branch própria e entra na `main` por pull request.
 
 ## Próximos passos
 
-- Silver e Gold do CEMADEN e do SIBH, para cruzar chuva e nível com as ocorrências do GeoSampa.
+- Silver e Gold do SIBH (chuva e nível).
+- Cruzamento da chuva e do nível com as ocorrências do GeoSampa.
 
 ## Fontes dos dados
 
