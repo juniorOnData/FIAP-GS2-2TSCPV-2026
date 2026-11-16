@@ -9,7 +9,8 @@
 # MAGIC 1. Aceita `.gpkg` ou `.zip` com `.gpkg` dentro. O ano é lido do nome do arquivo (`20AA`).
 # MAGIC 2. Cada camada do GeoPackage vira linhas com os atributos em string e a geometria em WKB (`geom_wkb`).
 # MAGIC 3. Arquivo já carregado (mesmo SHA256) é pulado.
-# MAGIC 4. Conferência por camada: linhas lidas precisam bater com as gravadas. Uma linha por arquivo no `geosampa_ingestion_log`.
+# MAGIC 4. Uma versão por ano: o volume deve ter um arquivo por ano (a carga para se houver dois). Quando o arquivo de um ano é trocado por uma versão corrigida (SHA256 novo), a nova é carregada e as linhas da anterior são removidas.
+# MAGIC 5. Conferência por camada: linhas lidas precisam bater com as gravadas. Uma linha por arquivo no `geosampa_ingestion_log`.
 
 # COMMAND ----------
 
@@ -92,6 +93,51 @@ def is_loaded(sha):
     return not spark.table(TABLE).filter(F.col("_source_sha256") == sha).isEmpty()
 
 
+def source_year(src):
+    match = re.search(r"(20\d{2})", os.path.basename(src))
+    return int(match.group(1)) if match else None
+
+
+def version_key(src):
+    """Chave da versão: o ano do arquivo, ou o caminho quando o nome não tem ano."""
+    year = source_year(src)
+    return str(year) if year else src
+
+
+# Mesma chave, calculada sobre a tabela.
+VERSION_KEY = F.coalesce(F.col("_source_year").cast("string"), F.col("_source_file"))
+
+
+def remove_superseded():
+    """Mantém, para cada ano, só a versão carregada por último. Devolve {chave: linhas removidas}."""
+    if not spark.catalog.tableExists(TABLE):
+        return Counter()
+    versions = (
+        spark.table(TABLE)
+        .groupBy(VERSION_KEY.alias("key"), "_source_sha256")
+        .agg(F.max("_ingested_at").alias("loaded_at"), F.count("*").alias("rows"))
+        .collect()
+    )
+    latest = {}
+    for v in versions:
+        if v.key not in latest or v.loaded_at > latest[v.key].loaded_at:
+            latest[v.key] = v
+    old = [v for v in versions if v._source_sha256 != latest[v.key]._source_sha256]
+    if old:
+        shas = ", ".join(f"'{v._source_sha256}'" for v in old)
+        spark.sql(f"DELETE FROM {TABLE} WHERE _source_sha256 IN ({shas})")
+
+    left = (spark.table(TABLE).groupBy(VERSION_KEY.alias("key"))
+            .agg(F.countDistinct("_source_sha256").alias("n")).filter("n > 1").collect())
+    assert not left, f"Ainda há mais de uma versão para: {[r.key for r in left]}"
+
+    removed = Counter()
+    for v in old:
+        removed[v.key] += v.rows
+        print(f"SUBSTITUIDO: versão anterior de {v.key} ({v._source_sha256[:8]}, {v.rows} linhas) removida")
+    return removed
+
+
 def read_gpkg(local_gpkg, source_file, sha, year):
     """Le cada camada do GPKG e devolve [(camada, n_linhas, DataFrame)]."""
     conn = sqlite3.connect(local_gpkg)
@@ -137,6 +183,18 @@ sources = sorted(
     if os.path.isfile(p) and p.lower().endswith((".gpkg", ".zip"))
 )
 
+# Um arquivo por ano no volume: com dois, a versão antiga e a nova se substituiriam a cada execução.
+by_key = {}
+for src in sources:
+    by_key.setdefault(version_key(src), []).append(os.path.basename(src))
+conflicts = {k: v for k, v in by_key.items() if len(v) > 1}
+if conflicts:
+    for key, names in conflicts.items():
+        registrar(key, "FALHA", datetime.now(timezone.utc),
+                  mensagem=f"mais de um arquivo para o mesmo ano no volume: {names}")
+    raise RuntimeError(f"Mais de um arquivo para o mesmo ano no volume: {conflicts}. "
+                       "Deixe só a versão mais recente de cada ano e rode de novo.")
+
 frames = []
 expected = Counter()
 pending_log = []  # (arquivo, sha256, janela, iniciado_em) dos arquivos lidos, registrados depois da gravação
@@ -147,8 +205,7 @@ for src in sources:
         print(f"PULADO (ja carregado): {os.path.basename(src)}")
         continue
 
-    match = re.search(r"(20\d{2})", os.path.basename(src))
-    year = int(match.group(1)) if match else None
+    year = source_year(src)
     janela = str(year) if year else os.path.basename(src)
     started = datetime.now(timezone.utc)
 
@@ -183,6 +240,8 @@ for src in sources:
 
 if not frames:
     print("Nada novo para carregar.")
+    # Termina a limpeza de uma execução interrompida entre a gravação e a remoção da versão anterior.
+    remove_superseded()
 else:
     try:
         bronze = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), frames)
@@ -202,6 +261,9 @@ else:
                 (F.col("_source_sha256") == sha) & (F.col("_source_layer") == layer)
             ).count()
             assert got == n, f"Camada {layer} ({sha[:8]}): lido {n}, gravado {got}"
+
+        # Arquivo corrigido de um ano já carregado: a versão nova fica e a anterior sai.
+        removed = remove_superseded()
     except Exception as exc:
         for src, sha, janela, started in pending_log:
             registrar(janela, "FALHA", started, arquivo=src, sha256=sha, mensagem=str(exc))
@@ -209,7 +271,9 @@ else:
 
     for src, sha, janela, started in pending_log:
         rows = sum(n for (s, _), n in expected.items() if s == sha)
-        registrar(janela, "SUCESSO" if rows else "SEM_DADOS", started, registros=rows, arquivo=src, sha256=sha)
+        replaced = removed.get(version_key(src), 0)
+        registrar(janela, "SUCESSO" if rows else "SEM_DADOS", started, registros=rows, arquivo=src, sha256=sha,
+                  mensagem=f"substituiu a versão anterior do arquivo ({replaced} linhas removidas)" if replaced else None)
     print(f"OK: {total_expected} linhas gravadas e conferidas em {TABLE}")
 
 display(

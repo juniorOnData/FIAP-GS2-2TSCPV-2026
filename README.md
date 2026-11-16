@@ -176,6 +176,7 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 | 4 | `04_fact_geosampa_flooding_events` | Silver, as duas dimensões e a `dim_tempo` |
 
 - Arquivos que já foram carregados (mesmo SHA256) são pulados.
+- Um arquivo por ano no volume. Para corrigir um ano, troque o arquivo no volume pela versão nova e rode o job: a carga grava a versão nova e remove as linhas da anterior. Se houver dois arquivos do mesmo ano, a carga para e pede para deixar só um.
 - A Silver converte a geometria (POINT ou POINT Z em WKB, conforme o ano do arquivo; SIRGAS 2000 / UTM 23S, EPSG 31983) em coordenadas UTM e em latitude e longitude. A conversão é uma UDF Python registrada no próprio notebook, e a última célula confere quantos pontos ficaram sem coordenada ou fora da área de São Paulo.
 - A Gold recarrega só os anos de origem novos ou alterados.
 
