@@ -1,0 +1,53 @@
+resources:
+  jobs:
+    ChuvaSegura:
+      name: ChuvaSegura
+      schedule:
+        quartz_cron_expression: 30 0 9 * * ?
+        timezone_id: America/Sao_Paulo
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: ingestion_history_flooding_events
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/ingestion/01_geosampa_history_flooding_events_bronze
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: ingestion_subprefecture_area
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/ingestion/01_geosampa_subprefecture_area_bronze
+            source: WORKSPACE
+        - task_key: silver_geosampa_flooding_events
+          depends_on:
+            - task_key: ingestion_history_flooding_events
+            - task_key: ingestion_subprefecture_area
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/silver/02_geosampa_flooding_events_silver
+            source: WORKSPACE
+        - task_key: dim_geosampa_subprefecture_area
+          depends_on:
+            - task_key: ingestion_subprefecture_area
+            - task_key: silver_geosampa_flooding_events
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/03_dim_geosampa_subprefecture_area
+            source: WORKSPACE
+        - task_key: dim_geosampa_type_flooding_events
+          depends_on:
+            - task_key: silver_geosampa_flooding_events
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/03_dim_geosampa_type_flooding_events
+            source: WORKSPACE
+        - task_key: gold_geosampa_flooding_events
+          depends_on:
+            - task_key: dim_geosampa_type_flooding_events
+            - task_key: dim_geosampa_subprefecture_area
+            - task_key: silver_geosampa_flooding_events
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/04_fact_geosampa_flooding_events
+            source: WORKSPACE
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
+      performance_target: PERFORMANCE_OPTIMIZED

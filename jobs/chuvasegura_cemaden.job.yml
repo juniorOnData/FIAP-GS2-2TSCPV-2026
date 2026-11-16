@@ -1,0 +1,43 @@
+# Job diário do CEMADEN: dois fluxos independentes (cadastro de estações e leituras de chuva).
+# A agenda começa pausada: rode antes o backfill das leituras manualmente
+# (01_cemaden_rainfall_readings_landing com modo = backfill) e depois mude pause_status para UNPAUSED.
+resources:
+  jobs:
+    ChuvaSegura_CEMADEN:
+      name: ChuvaSegura - CEMADEN
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"
+        timezone_id: America/Sao_Paulo
+        pause_status: PAUSED
+      tasks:
+        - task_key: cemaden_stations_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/ingestion/01_cemaden_stations_landing
+            source: WORKSPACE
+        - task_key: cemaden_stations_bronze
+          depends_on:
+            - task_key: cemaden_stations_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/bronze/02_cemaden_stations_bronze
+            base_parameters:
+              snapshot_date: pending
+            source: WORKSPACE
+        - task_key: cemaden_rainfall_readings_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/ingestion/01_cemaden_rainfall_readings_landing
+            base_parameters:
+              modo: incremental
+            source: WORKSPACE
+        - task_key: cemaden_rainfall_readings_bronze
+          depends_on:
+            - task_key: cemaden_rainfall_readings_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/bronze/02_cemaden_rainfall_readings_bronze
+            source: WORKSPACE
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
+      performance_target: PERFORMANCE_OPTIMIZED
