@@ -1,0 +1,47 @@
+# Job diário do SIBH: as tarefas são sequenciais porque a coleta das medições usa o cadastro da Bronze.
+# A agenda começa pausada: rode antes o backfill das medições manualmente
+# (03_sibh_measurements_landing com mode = backfill) e depois mude pause_status para UNPAUSED.
+resources:
+  jobs:
+    ChuvaSegura_SIBH:
+      name: ChuvaSegura - SIBH
+      schedule:
+        quartz_cron_expression: "0 30 7 * * ?"
+        timezone_id: America/Sao_Paulo
+        pause_status: PAUSED
+      tasks:
+        - task_key: sibh_stations_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sibh/ingestion/01_sibh_stations_landing
+            source: WORKSPACE
+        - task_key: sibh_stations_bronze
+          depends_on:
+            - task_key: sibh_stations_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sibh/transformations/bronze/02_sibh_stations_bronze
+            base_parameters:
+              snapshot_date: pending
+            source: WORKSPACE
+        - task_key: sibh_measurements_landing
+          depends_on:
+            - task_key: sibh_stations_bronze
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sibh/ingestion/03_sibh_measurements_landing
+            base_parameters:
+              mode: incremental
+            source: WORKSPACE
+        - task_key: sibh_measurements_bronze
+          depends_on:
+            - task_key: sibh_measurements_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sibh/transformations/bronze/04_sibh_measurements_bronze
+            base_parameters:
+              window: pending
+            source: WORKSPACE
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
+      performance_target: PERFORMANCE_OPTIMIZED

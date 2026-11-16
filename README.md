@@ -57,6 +57,10 @@ Situação atual:
 O número no início de cada arquivo indica a ordem de execução dentro da fonte.
 
 ```
+jobs/                                             # definição dos jobs do Databricks (YAML)
+├── chuvasegura_cemaden.job.yml
+├── chuvasegura_geosampa.job.yml
+└── chuvasegura_sibh.job.yml
 src/
 ├── common/
 │   └── ingestion_log.py                          # log de ingestão padrão (módulo Python)
@@ -167,17 +171,56 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - Arquivos que já foram carregados (mesmo SHA256) são pulados.
 - A Gold recarrega só os anos de origem novos ou alterados.
 
-### Jobs sugeridos
+## Jobs e workflows
 
-Os jobs são criados na interface do Databricks (*Workflows → Create job*), com uma tarefa por notebook na ordem acima.
+Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YAML dos jobs do Databricks (`resources.jobs`). Separar por fonte faz com que uma falha numa API não trave as outras.
 
-| Job | Tarefas | Agenda sugerida |
-|---|---|---|
-| CEMADEN | stations landing → stations bronze; readings landing (`modo = incremental`) → readings bronze | diária |
-| SIBH | stations landing → stations bronze → measurements landing (`mode = incremental`) → measurements bronze | diária |
-| GeoSampa | 01 → 02 → 03 → 04 | quando chegar um arquivo novo |
+| Arquivo | Job | Agenda (America/Sao_Paulo) | Situação |
+|---|---|---|---|
+| `jobs/chuvasegura_geosampa.job.yml` | `ChuvaSegura` | todo dia às 09:00:30 | ativo |
+| `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | pausado até o backfill |
+| `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | pausado até o backfill |
 
-O backfill inicial de CEMADEN e SIBH deve ser rodado manualmente uma vez, com o modo `backfill`, antes de agendar o incremental.
+```mermaid
+flowchart LR
+  subgraph cemaden["ChuvaSegura - CEMADEN"]
+    C1[01_cemaden_stations_landing] --> C2[02_cemaden_stations_bronze]
+    C3[01_cemaden_rainfall_readings_landing<br/>modo = incremental] --> C4[02_cemaden_rainfall_readings_bronze]
+  end
+  subgraph sibh["ChuvaSegura - SIBH"]
+    S1[01_sibh_stations_landing] --> S2[02_sibh_stations_bronze] --> S3[03_sibh_measurements_landing<br/>mode = incremental] --> S4[04_sibh_measurements_bronze]
+  end
+  subgraph geosampa["ChuvaSegura (GeoSampa)"]
+    G1[01_geosampa_history_flooding_events_bronze] --> G3[02_geosampa_flooding_events_silver]
+    G2[01_geosampa_subprefecture_area_bronze] --> G3
+    G2 --> G4[03_dim_geosampa_subprefecture_area]
+    G3 --> G4
+    G3 --> G5[03_dim_geosampa_type_flooding_events]
+    G3 --> G6[04_fact_geosampa_flooding_events]
+    G4 --> G6
+    G5 --> G6
+  end
+```
+
+Todos os jobs:
+- rodam em compute serverless (ambiente 6), com fila habilitada;
+- apontam para os notebooks no Git folder `/Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026`. Se o repositório estiver clonado em outro lugar, troque esse prefixo nos três arquivos.
+
+**Antes de ativar CEMADEN e SIBH:**
+1. Rode uma vez, manualmente, a carga do histórico com o modo `backfill`:
+   - CEMADEN: `01_cemaden_rainfall_readings_landing` com `modo = backfill`;
+   - SIBH: `03_sibh_measurements_landing` com `mode = backfill`.
+2. Rode as Bronzes correspondentes.
+3. Mude `pause_status` para `UNPAUSED`, ou ative a agenda na interface.
+
+O incremental diário cobre o mês atual e completa os meses parciais.
+
+**Como aplicar os YAMLs:**
+- **Job que já existe** (`ChuvaSegura`): troque o caminho de cada tarefa pelo do YAML. Em *Workflows → ChuvaSegura*, abra cada tarefa e edite o campo *Path*.
+- **Job novo:** crie em *Workflows → Create job*, com as tarefas, dependências, parâmetros (`base_parameters`) e agenda do arquivo.
+- **Com a Databricks CLI:** os arquivos já estão no formato de *resources* dos Databricks Asset Bundles. Para usar `databricks bundle deploy`, é preciso um `databricks.yml` na raiz que inclua `jobs/*.job.yml`. Para o bundle passar a gerenciar o `ChuvaSegura` já existente em vez de criar outro, use `databricks bundle deployment bind ChuvaSegura <job_id>`.
+
+Sempre que um notebook mudar de nome ou de pasta, atualize o YAML no mesmo PR.
 
 ## Logs de ingestão e meses parciais
 
