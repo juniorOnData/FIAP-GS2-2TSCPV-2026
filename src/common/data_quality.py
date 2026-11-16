@@ -121,11 +121,11 @@ def unico(tabela, colunas, severidade="ERRO", filtro=None, nome=None):
     )
 
 
-def existe_em(tabela, coluna, tabela_ref, coluna_ref=None, severidade="ERRO"):
+def existe_em(tabela, coluna, tabela_ref, coluna_ref=None, severidade="ERRO", limite=0.0):
     """Integridade referencial: todo valor de `coluna` existe em `tabela_ref`. Valor nulo conta como falha."""
     coluna_ref = coluna_ref or coluna
     return Regra(
-        nome=f"{coluna.lower()}_existe_em_{tabela_ref.split('.')[-1]}", tabela=tabela, severidade=severidade,
+        nome=f"{coluna.lower()}_existe_em_{tabela_ref.split('.')[-1]}", tabela=tabela, severidade=severidade, limite=limite,
         descricao=f"Todo {coluna} existe em {tabela_ref}.{coluna_ref}",
         consulta=(
             f"SELECT COUNT_IF(r.{coluna_ref} IS NULL) AS falhas, COUNT(*) AS total FROM {tabela} f "

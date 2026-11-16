@@ -1,6 +1,5 @@
-# Job diário do CEMADEN: dois fluxos independentes (cadastro de estações e leituras de chuva).
-# A agenda começa pausada: rode antes o backfill das leituras manualmente
-# (01_cemaden_rainfall_readings_landing com modo = backfill) e depois mude pause_status para UNPAUSED.
+# Job diário do CEMADEN: cadastro de estações e leituras de chuva, da landing até a Gold.
+# A qualidade da Silver barra a Gold: a dimensão e a fato só rodam se ela passar.
 resources:
   jobs:
     ChuvaSegura_CEMADEN:
@@ -8,7 +7,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 7 * * ?"
         timezone_id: America/Sao_Paulo
-        pause_status: PAUSED
+        pause_status: UNPAUSED
       tasks:
         - task_key: cemaden_stations_landing
           notebook_task:
@@ -33,6 +32,51 @@ resources:
             - task_key: cemaden_rainfall_readings_landing
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/bronze/02_cemaden_rainfall_readings_bronze
+            source: WORKSPACE
+        - task_key: cemaden_stations_silver
+          depends_on:
+            - task_key: cemaden_stations_bronze
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/silver/03_cemaden_stations_silver
+            source: WORKSPACE
+        - task_key: cemaden_rainfall_readings_silver
+          depends_on:
+            - task_key: cemaden_rainfall_readings_bronze
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/silver/03_cemaden_rainfall_readings_silver
+            base_parameters:
+              window: pending
+            source: WORKSPACE
+        - task_key: quality_silver_cemaden
+          depends_on:
+            - task_key: cemaden_stations_silver
+            - task_key: cemaden_rainfall_readings_silver
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/quality/03_cemaden_silver_quality
+            source: WORKSPACE
+        - task_key: dim_cemaden_stations
+          depends_on:
+            - task_key: quality_silver_cemaden
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/gold/04_dim_cemaden_stations
+            source: WORKSPACE
+        - task_key: dim_tempo
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/shared/transformations/gold/00_dim_tempo
+            source: WORKSPACE
+        - task_key: gold_cemaden_rainfall_hourly
+          depends_on:
+            - task_key: dim_cemaden_stations
+            - task_key: dim_tempo
+            - task_key: quality_silver_cemaden
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/transformations/gold/05_fact_cemaden_rainfall_hourly
+            source: WORKSPACE
+        - task_key: quality_gold_cemaden
+          depends_on:
+            - task_key: gold_cemaden_rainfall_hourly
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/cemaden/quality/05_cemaden_gold_quality
             source: WORKSPACE
       queue:
         enabled: true
