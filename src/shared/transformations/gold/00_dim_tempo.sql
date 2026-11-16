@@ -1,19 +1,124 @@
 -- Databricks notebook source
 -- MAGIC %md
--- MAGIC # 00_dim_tempo
+-- MAGIC # SHR_GLD_001 00_dim_tempo
 -- MAGIC
--- MAGIC Dimensão de tempo compartilhada por todas as fatos do projeto (GeoSampa, CEMADEN e SIBH), com granularidade diária.
+-- MAGIC ## 01. Identificação
 -- MAGIC
--- MAGIC Regras:
+-- MAGIC | Campo | Valor |
+-- MAGIC |---|---|
+-- MAGIC | Identificador | SHR_GLD_001 |
+-- MAGIC | Nome | 00_dim_tempo |
+-- MAGIC | Projeto | ChuvaSegura |
+-- MAGIC | Domínio de negócio | Calendário (compartilhado) |
+-- MAGIC | Camada | Gold |
+-- MAGIC | Linguagem | SQL |
+-- MAGIC | Responsável técnico | juniorOnData |
+-- MAGIC | Responsável funcional | A definir |
+-- MAGIC | Status | Produção |
+-- MAGIC | Versão | 1.1 |
+-- MAGIC | Criticidade | Alta |
+-- MAGIC | Caminho no repositório | `src/shared/transformations/gold/00_dim_tempo.sql` |
 -- MAGIC
--- MAGIC 1. Chave `COD_DIM_TEMPO` no formato `yyyyMMdd` (BIGINT), a mesma já usada pelas fatos. A chave não muda entre cargas.
--- MAGIC 2. Período de 2010-01-01 até 31/12 do ano seguinte ao atual. Cada execução insere os dias que faltam, então o calendário avança sozinho na virada do ano.
--- MAGIC 3. Nomes de mês e de dia da semana em português. Semana no padrão ISO (segunda = 1).
--- MAGIC 4. Atributos para a análise de chuva: estação do ano no hemisfério sul (datas fixas aproximadas) e período chuvoso de São Paulo (outubro a março).
--- MAGIC 5. Fatos com granularidade menor que o dia (por exemplo, chuva por hora) usam esta chave junto com a hora na própria fato.
+-- MAGIC ## 02. Objetivo
+-- MAGIC
+-- MAGIC Criar e manter a dimensão de tempo diária compartilhada por todas as fatos do projeto, com atributos de calendário em português e atributos para a análise de chuva.
+-- MAGIC
+-- MAGIC ## 03. Contexto funcional
+-- MAGIC
+-- MAGIC É a única dimensão compartilhada entre as fontes. Permite que ocorrências e medições de chuva sejam comparadas pela mesma data.
+-- MAGIC
+-- MAGIC ## 04. Arquitetura e fluxo
+-- MAGIC
+-- MAGIC | Posição | Item |
+-- MAGIC |---|---|
+-- MAGIC | Etapa anterior | Nenhuma |
+-- MAGIC | Etapa atual | Atualiza `fiap_analytics.gold.dim_tempo` |
+-- MAGIC | Etapa posterior | `04_fact_geosampa_flooding_events` e as futuras fatos de CEMADEN e SIBH |
+-- MAGIC
+-- MAGIC ## 05. Dependências
+-- MAGIC
+-- MAGIC | Tipo | Item | Uso |
+-- MAGIC |---|---|---|
+-- MAGIC | Permissão | USE CATALOG em `fiap_analytics`; SELECT em `fiap_analytics.bronze` e `fiap_analytics.silver`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.gold` | Criar e atualizar a dimensão |
+-- MAGIC
+-- MAGIC ## 06. Parâmetros de entrada
+-- MAGIC
+-- MAGIC Não aplicável. O período é calculado a partir da data atual; não há widgets.
+-- MAGIC
+-- MAGIC ## 07. Fontes de dados
+-- MAGIC
+-- MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
+-- MAGIC |---|---|---|---|---|---|---|
+-- MAGIC | Calendário gerado com `sequence` e `explode` | SQL | Gerado no notebook | Completa | Diária (job) | `COD_DIM_TEMPO` | Nenhum |
+-- MAGIC
+-- MAGIC ## 08. Processamento técnico
+-- MAGIC
+-- MAGIC | Etapa | Linguagem | Célula | Descrição |
+-- MAGIC |---|---|---|---|
+-- MAGIC | E01 | SQL | Criação da tabela | `CREATE TABLE IF NOT EXISTS` com chave primária `COD_DIM_TEMPO`. |
+-- MAGIC | E02 | SQL | Staging do calendário | View temporária com um dia por linha e todos os atributos. |
+-- MAGIC | E03 | SQL | Atualização | `MERGE`: insere os dias novos e corrige atributos de dias existentes se a regra de cálculo mudar. |
+-- MAGIC | E04 | SQL | Conferência | Conta dias, chaves distintas e dias faltando. |
+-- MAGIC
+-- MAGIC ## 09. Regras de negócio
+-- MAGIC
+-- MAGIC | ID | Regra | Lógica | Comportamento esperado |
+-- MAGIC |---|---|---|---|
+-- MAGIC | RN_SHR_001 | Período do calendário | De 2010-01-01 até 31/12 do ano seguinte ao atual. | Na virada do ano, o calendário avança sozinho. |
+-- MAGIC | RN_SHR_002 | Estação do ano | Verão de 21/12 a 19/03, Outono de 20/03 a 20/06, Inverno de 21/06 a 22/09, Primavera de 23/09 a 20/12 (datas fixas aproximadas). | `DSC_ESTACAO_ANO` preenchida para todo dia. |
+-- MAGIC | RN_SHR_003 | Período chuvoso | Meses de outubro a março. | `FLG_PERIODO_CHUVOSO` verdadeiro nesses meses. |
+-- MAGIC | RN_SHR_004 | Semana e dia da semana | Padrão ISO: segunda-feira = 1, domingo = 7. | `NUM_DIA_SEMANA` e `NUM_SEMANA_ANO` no padrão ISO. |
+-- MAGIC
+-- MAGIC ## 10. Saídas de dados
+-- MAGIC
+-- MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
+-- MAGIC |---|---|---|---|---|
+-- MAGIC | `fiap_analytics.gold.dim_tempo` | Delta | Um dia por linha | `COD_DIM_TEMPO` (PK, `yyyyMMdd`) | `MERGE` |
+-- MAGIC
+-- MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
+-- MAGIC
+-- MAGIC ## 11. Qualidade dos dados
+-- MAGIC
+-- MAGIC Conferência na última célula e regras DQ_GEO_GLD_016 (chave única) e DQ_GEO_GLD_017 (nenhum dia faltando), executadas por `04_geosampa_gold_quality`.
+-- MAGIC
+-- MAGIC ## 12. Tratamento de erros
+-- MAGIC
+-- MAGIC | Situação | Comportamento | Registro | Recuperação |
+-- MAGIC |---|---|---|---|
+-- MAGIC | Falha no `MERGE` | A tarefa falha e a fato do GeoSampa não roda | Saída da tarefa | Rodar o notebook de novo (idempotente) |
+-- MAGIC
+-- MAGIC ## 13. Segurança e governança
+-- MAGIC
+-- MAGIC | Item | Valor |
+-- MAGIC |---|---|
+-- MAGIC | Classificação dos dados | Pública (dados abertos da fonte; confirmar os termos de uso) |
+-- MAGIC | Dados sensíveis | Nenhum. As ocorrências têm coordenadas de logradouro, sem identificação de pessoas |
+-- MAGIC | Credenciais | Nenhuma |
+-- MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; SELECT em `fiap_analytics.bronze` e `fiap_analytics.silver`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.gold` |
+-- MAGIC | Políticas aplicáveis | Termos de uso dos dados abertos da Prefeitura de São Paulo (confirmar) |
+-- MAGIC
+-- MAGIC ## 14. Monitoramento e operação
+-- MAGIC
+-- MAGIC | Item | Valor |
+-- MAGIC |---|---|
+-- MAGIC | Job e tarefa | `ChuvaSegura` (`jobs/chuvasegura_geosampa.job.yml`), tarefa `dim_tempo` |
+-- MAGIC | Frequência | Diária, 09:00:30 (America/Sao_Paulo) |
+-- MAGIC | SLA | A definir |
+-- MAGIC | Métricas | Dias e dias faltando (conferência) |
+-- MAGIC | Logs | Resultados em `geosampa_data_quality_log` (etapa `gold`) |
+-- MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
+-- MAGIC | Reprocessamento | Rodar o notebook de novo (idempotente) |
+-- MAGIC
+-- MAGIC ## 15. Histórico de alterações
+-- MAGIC
+-- MAGIC | Versão | Data | Responsável | Descrição |
+-- MAGIC |---|---|---|---|
+-- MAGIC | 1.0 | 2026-11-16 | juniorOnData | Criação da dimensão de tempo compartilhada (PR #11) |
+-- MAGIC | 1.1 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
 
 -- COMMAND ----------
 
+-- [SQL] E01 Criação da tabela
 CREATE TABLE IF NOT EXISTS fiap_analytics.gold.dim_tempo (
   COD_DIM_TEMPO        BIGINT    NOT NULL COMMENT 'Data no formato yyyyMMdd (chave da dimensão)',
   DAT_DIA              DATE      NOT NULL COMMENT 'Data',
@@ -41,6 +146,7 @@ COMMENT 'Dimensão de tempo diária compartilhada pelas fatos do projeto ChuvaSe
 
 -- COMMAND ----------
 
+-- [SQL] E02 Staging do calendário
 -- Período: de 2010-01-01 até 31/12 do ano seguinte ao atual.
 CREATE OR REPLACE TEMP VIEW stg_dim_tempo AS
 WITH dias AS (
@@ -79,6 +185,7 @@ FROM dias;
 
 -- COMMAND ----------
 
+-- [SQL] E03 Atualização
 -- Insere os dias novos e corrige os atributos de um dia já existente se a regra de cálculo mudar.
 MERGE INTO fiap_analytics.gold.dim_tempo AS t
 USING stg_dim_tempo AS s
@@ -109,6 +216,7 @@ WHEN NOT MATCHED THEN INSERT (
 
 -- COMMAND ----------
 
+-- [SQL] E04 Conferência
 -- Conferência: um dia por chave e nenhum buraco no período.
 SELECT
   COUNT(*)                                            AS dias,

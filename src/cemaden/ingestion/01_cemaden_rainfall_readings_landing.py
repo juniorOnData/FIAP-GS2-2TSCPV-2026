@@ -1,23 +1,141 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 01_cemaden_rainfall_readings_landing
+# MAGIC # CEM_LND_002 01_cemaden_rainfall_readings_landing
 # MAGIC
-# MAGIC Baixa as leituras de chuva da rede CEMADEN no município de São Paulo pela API PED (`pcds/pcds-dados-pg`) e grava um arquivo por mês no volume `fiap_analytics.bronze.cemaden_rainfall_readings`.
+# MAGIC ## 01. Identificação
 # MAGIC
-# MAGIC Modos (widget `modo`):
+# MAGIC | Campo | Valor |
+# MAGIC |---|---|
+# MAGIC | Identificador | CEM_LND_002 |
+# MAGIC | Nome | 01_cemaden_rainfall_readings_landing |
+# MAGIC | Projeto | ChuvaSegura |
+# MAGIC | Domínio de negócio | Pluviometria (CEMADEN) |
+# MAGIC | Camada | Landing |
+# MAGIC | Linguagem | Python |
+# MAGIC | Responsável técnico | juniorOnData |
+# MAGIC | Responsável funcional | A definir |
+# MAGIC | Status | Homologação |
+# MAGIC | Versão | 1.3 |
+# MAGIC | Criticidade | Média |
+# MAGIC | Caminho no repositório | `src/cemaden/ingestion/01_cemaden_rainfall_readings_landing.py` |
 # MAGIC
-# MAGIC 1. `backfill` (padrão): baixa de `mes_inicio` até `mes_fim` (vazio = último mês fechado), pulando os meses já concluídos no log. Com `forcar_reprocesso = sim`, rebaixa todos.
-# MAGIC 2. `incremental`: baixa o mês atual, o mês anterior enquanto não estiver concluído e os meses que ficaram parciais.
+# MAGIC ## 02. Objetivo
 # MAGIC
-# MAGIC Regras:
+# MAGIC Baixar as leituras de chuva da rede CEMADEN no município pela API PED e gravar um arquivo por mês no volume, usando o log como checkpoint para continuar de onde parou.
 # MAGIC
-# MAGIC 1. Token da SGAA com as credenciais do secret scope `cemaden` (`ped_email` e `ped_password`). Limite da PED: 12 chamadas por minuto.
-# MAGIC 2. Um arquivo `ano=AAAA/mes=MM/readings_AAAAMM.json.gz` por mês, em JSON por linha, com os registros exatamente como a API devolve.
-# MAGIC 3. Mês completo só quando baixado pelo menos 3 dias depois de terminar (`CARENCIA`). Antes disso entra como `PARCIAL` no `cemaden_ingestion_log`.
-# MAGIC 4. O `cemaden_ingestion_log` serve de checkpoint: rodar de novo continua de onde parou.
+# MAGIC ## 03. Contexto funcional
+# MAGIC
+# MAGIC As leituras de chuva são a medida que será cruzada com as ocorrências de alagamento.
+# MAGIC
+# MAGIC ## 04. Arquitetura e fluxo
+# MAGIC
+# MAGIC | Posição | Item |
+# MAGIC |---|---|
+# MAGIC | Etapa anterior | Nenhuma |
+# MAGIC | Etapa atual | Grava `ano=AAAA/mes=MM/` no volume `cemaden_rainfall_readings` |
+# MAGIC | Etapa posterior | `02_cemaden_rainfall_readings_bronze` |
+# MAGIC
+# MAGIC ## 05. Dependências
+# MAGIC
+# MAGIC | Tipo | Item | Uso |
+# MAGIC |---|---|---|
+# MAGIC | Conexão | SGAA e PED `pcds/pcds-dados-pg` e `controle-paginacao/pagina` | Token e leituras paginadas |
+# MAGIC | Secret | Scope `cemaden`, chaves `ped_email` e `ped_password` | Credenciais da conta PED |
+# MAGIC | Tabela | `fiap_analytics.bronze.cemaden_ingestion_log` | Checkpoint dos meses concluídos e parciais |
+# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no log |
+# MAGIC | Biblioteca | `requests` | Chamadas HTTP |
+# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE VOLUME, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume de landing; acesso de saída à internet no compute | Criar o volume, gravar arquivos e o log |
+# MAGIC
+# MAGIC ## 06. Parâmetros de entrada
+# MAGIC
+# MAGIC | Nome | Tipo | Obrigatório | Descrição | Valor padrão | Exemplo |
+# MAGIC |---|---|---|---|---|---|
+# MAGIC | `modo` | dropdown (texto) | Sim | `backfill` baixa um intervalo de meses; `incremental` baixa o mês atual e os pendentes | backfill | incremental |
+# MAGIC | `mes_inicio` | text (AAAAMM) | No backfill | Primeiro mês do backfill | 201401 | 202001 |
+# MAGIC | `mes_fim` | text (AAAAMM) | Não | Último mês do backfill; vazio usa o último mês fechado | (vazio) | 202610 |
+# MAGIC | `forcar_reprocesso` | dropdown (nao/sim) | Não | No backfill, baixa de novo os meses já concluídos | nao | sim |
+# MAGIC
+# MAGIC ## 07. Fontes de dados
+# MAGIC
+# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
+# MAGIC |---|---|---|---|---|---|---|
+# MAGIC | PED `pcds/pcds-dados-pg` | JSON paginado (scroll) | CEMADEN | Por janela mensal | Diária no incremental | `codestacao` + `datahora` + `id_sensor` | `codibge = 3550308`, `rede = 11`, `datainicio` e `datafim` do mês |
+# MAGIC
+# MAGIC ## 08. Processamento técnico
+# MAGIC
+# MAGIC | Etapa | Linguagem | Célula | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | E01 | PY | Parâmetros | Widgets `modo`, `mes_inicio`, `mes_fim` e `forcar_reprocesso`. |
+# MAGIC | E02 | PY | Configuração | Imports, constantes da API, do volume e de retentativa, carência de 3 dias, `BATCH_ID` e criação do volume. |
+# MAGIC | E03 | PY | Log de ingestão | Importa o `IngestionLog` e define `registrar` (etapa `landing`). |
+# MAGIC | E04 | PY | Token e chamadas à PED | Gerenciador de token da SGAA, limitador de 5,5 s entre chamadas e `get_ped` com retentativa. |
+# MAGIC | E05 | PY | Coleta e gravação de um mês | Limites do mês, busca paginada, gravação gzip com SHA256, contagem de duplicados, regra de mês fechado e lista de meses. |
+# MAGIC | E06 | PY | Meses a processar | Lê no log os meses concluídos e parciais e monta a lista conforme o modo. |
+# MAGIC | E07 | PY | Coleta | Para cada mês, até 3 tentativas; grava o arquivo e registra `SUCESSO`, `PARCIAL`, `SEM_DADOS` ou `FALHA`; ao final, erro se algum mês falhou. |
+# MAGIC
+# MAGIC ## 09. Regras de negócio
+# MAGIC
+# MAGIC | ID | Regra | Lógica | Comportamento esperado |
+# MAGIC |---|---|---|---|
+# MAGIC | RN_CEM_001 | Recorte territorial e de rede | Município 3550308 (São Paulo) e rede 11 (CEMADEN). | Só leituras da capital. |
+# MAGIC | RN_CEM_002 | Mês completo | Um mês é completo se a coleta começou pelo menos 3 dias depois do fim do mês (carência para leituras atrasadas). | Antes disso o mês fica `PARCIAL` e volta a ser baixado. |
+# MAGIC | RN_CEM_003 | Meses do incremental | Mês atual, mês anterior enquanto não estiver concluído e meses parciais ainda não concluídos. | Nenhum mês fica incompleto para sempre, mesmo se o job passar dias sem rodar. |
+# MAGIC | RN_CEM_004 | Duplicidade de leitura | Chave `codestacao` + `datahora` + `id_sensor`. | Duplicados são contados e registrados em `duplicados`, mas não removidos na landing. |
+# MAGIC
+# MAGIC ## 10. Saídas de dados
+# MAGIC
+# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
+# MAGIC |---|---|---|---|---|
+# MAGIC | Volume `cemaden_rainfall_readings`: `ano=AAAA/mes=MM/readings_AAAAMM.json.gz` | JSON por linha (gzip) | Um arquivo por mês | `codestacao` + `datahora` + `id_sensor` | Sobrescreve o arquivo do mês |
+# MAGIC
+# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
+# MAGIC
+# MAGIC ## 11. Qualidade dos dados
+# MAGIC
+# MAGIC Contagem de duplicados por mês registrada no log. A conferência de linhas entre arquivo e log é feita na Bronze.
+# MAGIC
+# MAGIC ## 12. Tratamento de erros
+# MAGIC
+# MAGIC | Situação | Comportamento | Registro | Recuperação |
+# MAGIC |---|---|---|---|
+# MAGIC | Token recusado | Renova o token e reinicia o mês | Saída do notebook | Automática |
+# MAGIC | Erro no meio da paginação (o scroll expira em 30 s) | Reinicia o mês; até 3 tentativas com 30 s de espera | `FALHA` no log após a terceira | Rodar de novo: o notebook continua de onde parou |
+# MAGIC | Meses com falha ao final | A tarefa termina com erro listando os meses | `FALHA` no log | Rodar de novo |
+# MAGIC
+# MAGIC ## 13. Segurança e governança
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Classificação dos dados | Pública (dados da rede observacional do CEMADEN/MCTI; confirmar os termos de uso da PED) |
+# MAGIC | Dados sensíveis | Nenhum nos dados. As credenciais da conta PED são sensíveis |
+# MAGIC | Credenciais | Secret scope `cemaden`, chaves `ped_email` e `ped_password` |
+# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE VOLUME, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume de landing; acesso de saída à internet no compute |
+# MAGIC | Políticas aplicáveis | Termos de uso da API PED do CEMADEN (confirmar); credenciais nunca impressas nem gravadas |
+# MAGIC
+# MAGIC ## 14. Monitoramento e operação
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Job e tarefa | `ChuvaSegura - CEMADEN` (`jobs/chuvasegura_cemaden.job.yml`), tarefa `cemaden_rainfall_readings_landing` |
+# MAGIC | Frequência | Diária, 07:00 (America/Sao_Paulo); agenda pausada até o backfill |
+# MAGIC | SLA | A definir |
+# MAGIC | Métricas | Meses por status, registros, páginas e duplicados |
+# MAGIC | Logs | `fiap_analytics.bronze.cemaden_ingestion_log` (etapa `landing`, janela = AAAAMM) |
+# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
+# MAGIC | Reprocessamento | Backfill com `forcar_reprocesso = sim` para o intervalo desejado |
+# MAGIC
+# MAGIC ## 15. Histórico de alterações
+# MAGIC
+# MAGIC | Versão | Data | Responsável | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | 1.0 | 2026-11-10 | juniorOnData | Criação da coleta de leituras de chuva (PR #6) |
+# MAGIC | 1.1 | 2026-11-16 | juniorOnData | Log de ingestão próprio da origem e meses parciais (PR #8) |
+# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Formato de código fonte, módulo de log compartilhado e novo nome do arquivo (PR #9) |
+# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
 
 # COMMAND ----------
 
+# [PY] E01 Parâmetros
 dbutils.widgets.dropdown("modo", "backfill", ["backfill", "incremental"], "Modo")
 dbutils.widgets.text("mes_inicio", "201401", "Mês inicial (AAAAMM)")
 dbutils.widgets.text("mes_fim", "", "Mês final (AAAAMM, vazio = último mês fechado)")
@@ -25,6 +143,7 @@ dbutils.widgets.dropdown("forcar_reprocesso", "nao", ["nao", "sim"], "Rebaixar m
 
 # COMMAND ----------
 
+# [PY] E02 Configuração
 import base64
 import calendar
 import gzip
@@ -73,6 +192,7 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {CATALOGO}.{SCHEMA}.cemaden_rainfall_rea
 
 # COMMAND ----------
 
+# [PY] E03 Log de ingestão
 # Log padrão da origem (src/common/ingestion_log.py). Sobe pelas pastas até achar src/ para importar o módulo.
 _src = os.getcwd()
 while not os.path.isdir(os.path.join(_src, "common")) and os.path.dirname(_src) != _src:
@@ -95,6 +215,7 @@ registrar = IngestionLog(spark, LOG_TABLE, FONTE, ETAPA, BATCH_ID).registrar
 
 # COMMAND ----------
 
+# [PY] E04 Token e chamadas à PED
 def jwt_expiracao(jwt: str) -> datetime:
     payload = jwt.split(".")[1]
     payload += "=" * (-len(payload) % 4)
@@ -184,6 +305,7 @@ def get_ped(path: str, params: dict) -> requests.Response:
 
 # COMMAND ----------
 
+# [PY] E05 Coleta e gravação de um mês
 def limites_mes(ano: int, mes: int) -> tuple:
     ultimo_dia = calendar.monthrange(ano, mes)[1]
     return f"{ano}{mes:02d}010000", f"{ano}{mes:02d}{ultimo_dia:02d}2359"
@@ -257,6 +379,7 @@ def lista_meses(inicio: str, fim: str) -> list:
 
 # COMMAND ----------
 
+# [PY] E06 Meses a processar
 hoje = datetime.now(timezone.utc).date()
 mes_atual = (hoje.year, hoje.month)
 mes_anterior = (hoje.year - 1, 12) if hoje.month == 1 else (hoje.year, hoje.month - 1)
@@ -294,6 +417,7 @@ print([f"{a}{m:02d}" for a, m in meses])
 
 # COMMAND ----------
 
+# [PY] E07 Coleta
 resumo = []
 for ano, mes in meses:
     janela = f"{ano}{mes:02d}"
