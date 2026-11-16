@@ -1,19 +1,133 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 01_geosampa_history_flooding_events_bronze
+# MAGIC # GEO_BRZ_002 01_geosampa_history_flooding_events_bronze
 # MAGIC
-# MAGIC Carrega na Bronze os arquivos de ocorrências (alagamento, deslizamento, inundação, queda de árvore) do GeoSampa enviados para o volume `fiap_analytics.bronze.geosampa_history_flooding_events`.
+# MAGIC ## 01. Identificação
 # MAGIC
-# MAGIC Regras:
+# MAGIC | Campo | Valor |
+# MAGIC |---|---|
+# MAGIC | Identificador | GEO_BRZ_002 |
+# MAGIC | Nome | 01_geosampa_history_flooding_events_bronze |
+# MAGIC | Projeto | ChuvaSegura |
+# MAGIC | Domínio de negócio | Ocorrências de alagamento (GeoSampa) |
+# MAGIC | Camada | Bronze |
+# MAGIC | Linguagem | Python e SQL |
+# MAGIC | Responsável técnico | juniorOnData |
+# MAGIC | Responsável funcional | A definir |
+# MAGIC | Status | Produção |
+# MAGIC | Versão | 1.5 |
+# MAGIC | Criticidade | Média |
+# MAGIC | Caminho no repositório | `src/geosampa/ingestion/01_geosampa_history_flooding_events_bronze.py` |
 # MAGIC
-# MAGIC 1. Aceita `.gpkg` ou `.zip` com `.gpkg` dentro. O ano é lido do nome do arquivo (`20AA`).
-# MAGIC 2. Cada camada do GeoPackage vira linhas com os atributos em string e a geometria em WKB (`geom_wkb`).
-# MAGIC 3. Arquivo já carregado (mesmo SHA256) é pulado.
-# MAGIC 4. Uma versão por ano: o volume deve ter um arquivo por ano (a carga para se houver dois). Quando o arquivo de um ano é trocado por uma versão corrigida (SHA256 novo), a nova é carregada e as linhas da anterior são removidas.
-# MAGIC 5. Conferência por camada: linhas lidas precisam bater com as gravadas. Uma linha por arquivo no `geosampa_ingestion_log`.
+# MAGIC ## 02. Objetivo
+# MAGIC
+# MAGIC Carregar na Bronze os arquivos GeoPackage de ocorrências do GeoSampa (alagamento, deslizamento, inundação, queda de árvore) enviados para o volume, guardando os atributos como texto, a geometria em WKB e as colunas de linhagem. Garante uma versão por ano e substitui a versão anterior quando um arquivo é corrigido.
+# MAGIC
+# MAGIC ## 03. Contexto funcional
+# MAGIC
+# MAGIC As ocorrências são o fato central do projeto: é com elas que a chuva e o nível dos rios serão cruzados. Os arquivos são publicados por ano pela Prefeitura e enviados manualmente ao volume.
+# MAGIC
+# MAGIC ## 04. Arquitetura e fluxo
+# MAGIC
+# MAGIC | Posição | Item |
+# MAGIC |---|---|
+# MAGIC | Etapa anterior | Upload dos arquivos `.gpkg` ou `.zip` no volume `geosampa_history_flooding_events` |
+# MAGIC | Etapa atual | Grava `fiap_analytics.bronze.geosampa_history_flooding_events` |
+# MAGIC | Etapa posterior | `02_geosampa_flooding_events_silver` |
+# MAGIC
+# MAGIC ## 05. Dependências
+# MAGIC
+# MAGIC | Tipo | Item | Uso |
+# MAGIC |---|---|---|
+# MAGIC | Volume | `/Volumes/fiap_analytics/bronze/geosampa_history_flooding_events` | Arquivos de origem |
+# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no `geosampa_ingestion_log` |
+# MAGIC | Biblioteca | `sqlite3`, `zipfile`, `hashlib` (biblioteca padrão do Python) | Leitura do GeoPackage, extração do zip e SHA256 |
+# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume | Ler arquivos, criar o volume e gravar a tabela |
+# MAGIC
+# MAGIC ## 06. Parâmetros de entrada
+# MAGIC
+# MAGIC Não aplicável. O notebook processa todos os arquivos do volume; não há widgets.
+# MAGIC
+# MAGIC ## 07. Fontes de dados
+# MAGIC
+# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
+# MAGIC |---|---|---|---|---|---|---|
+# MAGIC | `/Volumes/fiap_analytics/bronze/geosampa_history_flooding_events/**` | GeoPackage (`.gpkg`) ou `.zip` com `.gpkg` | GeoSampa, Prefeitura de São Paulo | Incremental por arquivo (SHA256) | Quando chega um arquivo novo | Arquivo (SHA256) e ano do nome | Somente camadas do tipo `features` |
+# MAGIC
+# MAGIC ## 08. Processamento técnico
+# MAGIC
+# MAGIC | Etapa | Linguagem | Célula | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | E01 | PY | Imports | Bibliotecas padrão do Python e PySpark. |
+# MAGIC | E02 | PY | Configuração e log | Caminho do volume, tabela de destino, tamanhos de envelope do GeoPackage, `BATCH_ID` e log de ingestão (`geosampa_ingestion_log`, etapa `bronze`). |
+# MAGIC | E03 | SQL | Volume | `CREATE VOLUME IF NOT EXISTS` do volume de origem. |
+# MAGIC | E04 | PY | Funções | SHA256 do arquivo, remoção do cabeçalho GeoPackage para obter o WKB, verificação de arquivo já carregado, ano do arquivo, chave da versão, remoção de versões anteriores e leitura das camadas. |
+# MAGIC | E05 | PY | Leitura dos arquivos | Valida um arquivo por ano, pula arquivos já carregados, extrai o zip com proteção contra caminhos maliciosos e lê as camadas. Registra `FALHA` se a leitura falhar. |
+# MAGIC | E06 | PY | Gravação | União das camadas, conferência da contagem, `append` com `mergeSchema`, conferência por camada, remoção da versão anterior do ano, registro `SUCESSO` e resumo por ano. |
+# MAGIC
+# MAGIC ## 09. Regras de negócio
+# MAGIC
+# MAGIC | ID | Regra | Lógica | Comportamento esperado |
+# MAGIC |---|---|---|---|
+# MAGIC | RN_GEO_001 | Ano de origem do arquivo | O ano é o primeiro trecho `20AA` do nome do arquivo e vai para `_source_year`. | Arquivo sem ano no nome usa o caminho como chave da versão e fica com `_source_year` nulo (barrado na Silver pela regra DQ_GEO_SLV_003). |
+# MAGIC | RN_GEO_002 | Uma versão por ano | O volume deve ter um arquivo por ano. Um arquivo com SHA256 novo para um ano já carregado é gravado e, depois da conferência, as linhas das versões anteriores daquele ano são apagadas. | Cada ano fica com um único SHA256 na tabela. Dois arquivos do mesmo ano no volume param a carga com `FALHA`. |
+# MAGIC
+# MAGIC ## 10. Saídas de dados
+# MAGIC
+# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
+# MAGIC |---|---|---|---|---|
+# MAGIC | `fiap_analytics.bronze.geosampa_history_flooding_events` | Delta | Uma linha por feição de cada camada do arquivo | `_source_year` + `id` (ou `primaryindex`) | `append` com `mergeSchema`; versão anterior removida por `DELETE` |
+# MAGIC
+# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
+# MAGIC
+# MAGIC ## 11. Qualidade dos dados
+# MAGIC
+# MAGIC Validações no próprio notebook: contagem lida igual à gravada, no total e por camada (`assert`); uma versão por ano ao final da limpeza (`assert`); bloqueio de dois arquivos do mesmo ano. Os atributos variam por ano (por exemplo, `subprefeit` ou `subpreit`, `id` ou `primaryindex`); o `mergeSchema` acrescenta as colunas novas e a Silver trata as variações. A duplicidade de `name` no ano é monitorada pela regra DQ_GEO_SLV_006.
+# MAGIC
+# MAGIC ## 12. Tratamento de erros
+# MAGIC
+# MAGIC | Situação | Comportamento | Registro | Recuperação |
+# MAGIC |---|---|---|---|
+# MAGIC | Dois arquivos do mesmo ano no volume | Para antes de ler qualquer arquivo | `FALHA` no `geosampa_ingestion_log` | Deixar só a versão mais recente no volume e rodar de novo |
+# MAGIC | Erro ao ler um arquivo (zip inválido, GeoPackage corrompido) | Para a execução | `FALHA` com a mensagem do erro | Substituir o arquivo e rodar de novo |
+# MAGIC | Contagem divergente na gravação | Para a execução antes de remover a versão anterior | `FALHA` para cada arquivo do lote | Rodar de novo: arquivos já gravados são pulados e a limpeza termina o serviço |
+# MAGIC
+# MAGIC ## 13. Segurança e governança
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Classificação dos dados | Pública (dados abertos da fonte; confirmar os termos de uso) |
+# MAGIC | Dados sensíveis | Nenhum. As ocorrências têm coordenadas de logradouro, sem identificação de pessoas |
+# MAGIC | Credenciais | Nenhuma |
+# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume |
+# MAGIC | Políticas aplicáveis | Termos de uso dos dados abertos da Prefeitura de São Paulo (confirmar) |
+# MAGIC
+# MAGIC ## 14. Monitoramento e operação
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Job e tarefa | `ChuvaSegura` (`jobs/chuvasegura_geosampa.job.yml`), tarefa `ingestion_history_flooding_events` |
+# MAGIC | Frequência | Diária, 09:00:30 (America/Sao_Paulo) |
+# MAGIC | SLA | A definir |
+# MAGIC | Métricas | Linhas por ano e arquivos carregados ou pulados |
+# MAGIC | Logs | `fiap_analytics.bronze.geosampa_ingestion_log` (etapa `bronze`, janela = ano) |
+# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
+# MAGIC | Reprocessamento | Trocar o arquivo do ano no volume e rodar o job. Ver reprocessamento (`docs/04_operacao/reprocessamento.md`) |
+# MAGIC
+# MAGIC ## 15. Histórico de alterações
+# MAGIC
+# MAGIC | Versão | Data | Responsável | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | 1.0 | 2026-11-06 | juniorOnData | Criação da ingestão dos arquivos GeoPackage (PR #1) |
+# MAGIC | 1.1 | 2026-11-06 | juniorOnData | Ajuste de caminho (PR #4) |
+# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Registro no `geosampa_ingestion_log` (PR #8) |
+# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Formato de código fonte e módulo de log compartilhado (PR #9) |
+# MAGIC | 1.4 | 2026-11-16 | juniorOnData | Arquivo corrigido substitui a versão anterior do ano (PR #13) |
+# MAGIC | 1.5 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
 
 # COMMAND ----------
 
+# [PY] E01 Imports
 import glob
 import hashlib
 import os
@@ -33,6 +147,7 @@ from pyspark.sql.types import BinaryType, StringType, StructField, StructType
 
 # COMMAND ----------
 
+# [PY] E02 Configuração e log
 VOLUME_PATH = "/Volumes/fiap_analytics/bronze/geosampa_history_flooding_events"
 TABLE = "fiap_analytics.bronze.geosampa_history_flooding_events"
 
@@ -58,10 +173,12 @@ registrar = IngestionLog(spark, LOG_TABLE, FONTE, ETAPA, BATCH_ID).registrar
 # COMMAND ----------
 
 # MAGIC %sql
+# MAGIC -- [SQL] E03 Volume
 # MAGIC CREATE VOLUME IF NOT EXISTS fiap_analytics.bronze.geosampa_history_flooding_events;
 
 # COMMAND ----------
 
+# [PY] E04 Funções
 def sha256_of(path):
     digest = hashlib.sha256()
     with open(path, "rb") as f:
@@ -178,6 +295,7 @@ def read_gpkg(local_gpkg, source_file, sha, year):
 
 # COMMAND ----------
 
+# [PY] E05 Leitura dos arquivos
 sources = sorted(
     p for p in glob.glob(f"{VOLUME_PATH}/**/*", recursive=True)
     if os.path.isfile(p) and p.lower().endswith((".gpkg", ".zip"))
@@ -238,6 +356,7 @@ for src in sources:
 
 # COMMAND ----------
 
+# [PY] E06 Gravação
 if not frames:
     print("Nada novo para carregar.")
     # Termina a limpeza de uma execução interrompida entre a gravação e a remoção da versão anterior.

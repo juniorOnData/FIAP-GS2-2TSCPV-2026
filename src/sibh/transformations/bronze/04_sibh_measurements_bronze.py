@@ -1,25 +1,135 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 04_sibh_measurements_bronze
+# MAGIC # SIB_BRZ_002 04_sibh_measurements_bronze
 # MAGIC
-# MAGIC Carrega as medições do SIBH do volume `fiap_analytics.bronze.sibh_measurements` para a tabela `fiap_analytics.bronze.sibh_measurements`.
+# MAGIC ## 01. Identificação
 # MAGIC
-# MAGIC Regras (mesmo padrão das leituras do CEMADEN):
+# MAGIC | Campo | Valor |
+# MAGIC |---|---|
+# MAGIC | Identificador | SIB_BRZ_002 |
+# MAGIC | Nome | 04_sibh_measurements_bronze |
+# MAGIC | Projeto | ChuvaSegura |
+# MAGIC | Domínio de negócio | Hidrologia (SIBH) |
+# MAGIC | Camada | Bronze |
+# MAGIC | Linguagem | Python |
+# MAGIC | Responsável técnico | juniorOnData |
+# MAGIC | Responsável funcional | A definir |
+# MAGIC | Status | Homologação |
+# MAGIC | Versão | 1.3 |
+# MAGIC | Criticidade | Média |
+# MAGIC | Caminho no repositório | `src/sibh/transformations/bronze/04_sibh_measurements_bronze.py` |
 # MAGIC
-# MAGIC 1. Tudo em string, sem filtros e sem conversão de valores. `measurement_classification_type_id`, `read_value` e `qtd` são preservados.
-# MAGIC 2. `date` fica como a API devolve (UTC, texto `AAAA/MM/DD HH:mm`). Conversão para America/Sao_Paulo na Silver.
-# MAGIC 3. Idempotência por mês: a fatia `_window = 'AAAA-MM'` é substituída com `replaceWhere`. Tabela particionada por `_window_year`.
-# MAGIC 4. Só entram meses com manifesto. Conferência: linhas lidas de cada arquivo precisam bater com o `record_count` do manifesto, e as linhas na tabela com as lidas.
-# MAGIC 5. Campos fora do schema esperado vão para `_rescued_data`.
+# MAGIC ## 02. Objetivo
 # MAGIC
-# MAGIC Widget `window`: `pending` (padrão: meses novos ou rebaixados depois da última carga), `all` ou um mês `AAAA-MM`.
+# MAGIC Carregar na Bronze os meses de medições do SIBH com manifesto, substituindo a fatia de cada mês e conferindo a contagem com o manifesto.
+# MAGIC
+# MAGIC ## 03. Contexto funcional
+# MAGIC
+# MAGIC Disponibiliza as medições brutas de chuva e nível em tabela para a futura Silver do SIBH.
+# MAGIC
+# MAGIC ## 04. Arquitetura e fluxo
+# MAGIC
+# MAGIC | Posição | Item |
+# MAGIC |---|---|
+# MAGIC | Etapa anterior | `03_sibh_measurements_landing` |
+# MAGIC | Etapa atual | Grava `fiap_analytics.bronze.sibh_measurements` |
+# MAGIC | Etapa posterior | Silver do SIBH (a desenvolver) |
+# MAGIC
+# MAGIC ## 05. Dependências
+# MAGIC
+# MAGIC | Tipo | Item | Uso |
+# MAGIC |---|---|---|
+# MAGIC | Volume | `/Volumes/fiap_analytics/bronze/sibh_measurements` | Arquivos e manifestos mensais |
+# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no log |
+# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME no volume | Ler arquivos e gravar a tabela |
+# MAGIC
+# MAGIC ## 06. Parâmetros de entrada
+# MAGIC
+# MAGIC | Nome | Tipo | Obrigatório | Descrição | Valor padrão | Exemplo |
+# MAGIC |---|---|---|---|---|---|
+# MAGIC | `window` | text (texto) | Não | `pending` (meses novos ou baixados de novo), `all` ou um mês `AAAA-MM` | pending | 2026-10 |
+# MAGIC
+# MAGIC ## 07. Fontes de dados
+# MAGIC
+# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
+# MAGIC |---|---|---|---|---|---|---|
+# MAGIC | Volume `sibh_measurements`, meses com manifesto | JSON por linha (gzip) | Landing do SIBH | Por mês | Diária | `station_prefix_id` + `date` | Conforme `window` |
+# MAGIC
+# MAGIC ## 08. Processamento técnico
+# MAGIC
+# MAGIC | Etapa | Linguagem | Célula | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | E01 | PY | Parâmetros | Widget `window`. |
+# MAGIC | E02 | PY | Configuração | Imports, constantes, campos esperados das medições e schema em texto. |
+# MAGIC | E03 | PY | Log de ingestão | Importa o `IngestionLog` e define `registrar` (etapa `bronze`). |
+# MAGIC | E04 | PY | Meses a carregar | Lista os meses com manifesto e escolhe conforme o parâmetro. |
+# MAGIC | E05 | PY | Carga mês a mês | Leitura, validação (contagem contra o manifesto, sensor e data presentes, campos novos), substituição da fatia com `replaceWhere` (ou `DELETE` se o mês não tem medições), conferência e log. |
+# MAGIC | E06 | PY | Resumo por instituição | Sensores, período e linhas por instituição e tipo. |
+# MAGIC | E07 | PY | Classificações de qualidade | Distribuição de `measurement_classification_type_id`. |
+# MAGIC
+# MAGIC ## 09. Regras de negócio
+# MAGIC
+# MAGIC | ID | Regra | Lógica | Comportamento esperado |
+# MAGIC |---|---|---|---|
+# MAGIC | RN_SIB_006 | Horário em UTC | `date` fica como a API devolve (UTC, texto `AAAA/MM/DD HH:mm`). | A conversão para America/Sao_Paulo é feita na Silver. |
+# MAGIC
+# MAGIC ## 10. Saídas de dados
+# MAGIC
+# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
+# MAGIC |---|---|---|---|---|
+# MAGIC | `fiap_analytics.bronze.sibh_measurements` | Delta, particionada por `_window_year` | Uma linha por medição | `station_prefix_id` + `date` | `overwrite` com `replaceWhere` por `_window` (AAAA-MM) |
+# MAGIC
+# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
+# MAGIC
+# MAGIC ## 11. Qualidade dos dados
+# MAGIC
+# MAGIC Bloqueia a gravação de um mês se a contagem divergir do manifesto ou se houver linha sem `station_prefix_id` ou `date`. Campos novos vão para `_rescued_data` e geram aviso.
+# MAGIC
+# MAGIC ## 12. Tratamento de erros
+# MAGIC
+# MAGIC | Situação | Comportamento | Registro | Recuperação |
+# MAGIC |---|---|---|---|
+# MAGIC | Mês com falha | Registra `FALHA`, segue para os outros meses e termina com erro | `FALHA` no `fiap_analytics.bronze.sibh_ingestion_log` | Rodar de novo com `window` no mês afetado |
+# MAGIC
+# MAGIC ## 13. Segurança e governança
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Classificação dos dados | Pública (API pública do SIBH, SP Águas; confirmar os termos de uso) |
+# MAGIC | Dados sensíveis | Nenhum |
+# MAGIC | Credenciais | Nenhuma (API pública, sem autenticação) |
+# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME no volume |
+# MAGIC | Políticas aplicáveis | Termos de uso dos dados do SIBH (confirmar) |
+# MAGIC
+# MAGIC ## 14. Monitoramento e operação
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Job e tarefa | `ChuvaSegura - SIBH` (`jobs/chuvasegura_sibh.job.yml`), tarefa `sibh_measurements_bronze` |
+# MAGIC | Frequência | Diária, 07:30 (America/Sao_Paulo); agenda pausada até o backfill |
+# MAGIC | SLA | A definir |
+# MAGIC | Métricas | Linhas e sensores por mês |
+# MAGIC | Logs | `fiap_analytics.bronze.sibh_ingestion_log` (etapa `bronze`) |
+# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
+# MAGIC | Reprocessamento | `window = all` ou o mês desejado |
+# MAGIC
+# MAGIC ## 15. Histórico de alterações
+# MAGIC
+# MAGIC | Versão | Data | Responsável | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | 1.0 | 2026-11-16 | juniorOnData | Criação do notebook (commit `2a2af58`, sem PR) |
+# MAGIC | 1.1 | 2026-11-16 | juniorOnData | Log de ingestão próprio da origem, no formato padrão (PR #8) |
+# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Formato de código fonte, módulo de log compartilhado e novo nome `04_sibh_measurements_bronze` (PR #9) |
+# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
 
 # COMMAND ----------
 
+# [PY] E01 Parâmetros
 dbutils.widgets.text("window", "pending", "Mês: pending, all ou AAAA-MM")
 
 # COMMAND ----------
 
+# [PY] E02 Configuração
 import json
 import os
 import sys
@@ -77,6 +187,7 @@ print(f"batch_id={BATCH_ID} | window={WINDOW_ARG}")
 
 # COMMAND ----------
 
+# [PY] E03 Log de ingestão
 # Log padrão da origem (src/common/ingestion_log.py). Sobe pelas pastas até achar src/ para importar o módulo.
 _src = os.getcwd()
 while not os.path.isdir(os.path.join(_src, "common")) and os.path.dirname(_src) != _src:
@@ -99,6 +210,7 @@ registrar = IngestionLog(spark, LOG_TABLE, FONTE, ETAPA, BATCH_ID).registrar
 
 # COMMAND ----------
 
+# [PY] E04 Meses a carregar
 def list_landing_months():
     """Lista {AAAA-MM: (caminho_do_arquivo, manifesto)} dos meses completos no volume."""
     found = {}
@@ -146,6 +258,7 @@ print(f"Meses a carregar: {len(windows)} ({windows[0]} a {windows[-1]})")
 
 # COMMAND ----------
 
+# [PY] E05 Carga mês a mês
 def read_month(window: str):
     data_path, manifest = landing[window]
     if int(manifest["record_count"]) == 0:
@@ -236,6 +349,7 @@ if failed:
 
 # COMMAND ----------
 
+# [PY] E06 Resumo por instituição
 display(spark.sql(f"""
     SELECT
         m.station_owner,
@@ -252,6 +366,7 @@ display(spark.sql(f"""
 
 # COMMAND ----------
 
+# [PY] E07 Classificações de qualidade
 # Distribuição das classificações de qualidade (a consulta pública devolve 1, 2 e 3; o significado ainda não foi documentado).
 display(spark.sql(f"""
     SELECT measurement_classification_type_id, COUNT(*) AS linhas

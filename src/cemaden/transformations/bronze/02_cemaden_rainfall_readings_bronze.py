@@ -1,18 +1,122 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02_cemaden_rainfall_readings_bronze
+# MAGIC # CEM_BRZ_002 02_cemaden_rainfall_readings_bronze
 # MAGIC
-# MAGIC Carrega as leituras de chuva do volume `fiap_analytics.bronze.cemaden_rainfall_readings` para a tabela de mesmo nome.
+# MAGIC ## 01. Identificação
 # MAGIC
-# MAGIC Regras:
+# MAGIC | Campo | Valor |
+# MAGIC |---|---|
+# MAGIC | Identificador | CEM_BRZ_002 |
+# MAGIC | Nome | 02_cemaden_rainfall_readings_bronze |
+# MAGIC | Projeto | ChuvaSegura |
+# MAGIC | Domínio de negócio | Pluviometria (CEMADEN) |
+# MAGIC | Camada | Bronze |
+# MAGIC | Linguagem | Python |
+# MAGIC | Responsável técnico | juniorOnData |
+# MAGIC | Responsável funcional | A definir |
+# MAGIC | Status | Homologação |
+# MAGIC | Versão | 1.3 |
+# MAGIC | Criticidade | Média |
+# MAGIC | Caminho no repositório | `src/cemaden/transformations/bronze/02_cemaden_rainfall_readings_bronze.py` |
 # MAGIC
-# MAGIC 1. Meses pendentes: os que tiveram landing (`SUCESSO` ou `PARCIAL`) depois da última carga na Bronze, segundo o `cemaden_ingestion_log`.
-# MAGIC 2. Tudo em string. Campos que a API passar a mandar vão para `_rescued_data`.
-# MAGIC 3. Idempotência por mês: a fatia `_window = 'AAAAMM'` é substituída com `replaceWhere`. Tabela particionada por `_window_year`.
-# MAGIC 4. Conferência: linhas lidas precisam bater com as registradas na landing.
+# MAGIC ## 02. Objetivo
+# MAGIC
+# MAGIC Carregar na Bronze os meses de leituras de chuva baixados pela landing, substituindo a fatia de cada mês e conferindo a contagem com o log.
+# MAGIC
+# MAGIC ## 03. Contexto funcional
+# MAGIC
+# MAGIC Disponibiliza as leituras brutas em tabela para a futura Silver de chuva.
+# MAGIC
+# MAGIC ## 04. Arquitetura e fluxo
+# MAGIC
+# MAGIC | Posição | Item |
+# MAGIC |---|---|
+# MAGIC | Etapa anterior | `01_cemaden_rainfall_readings_landing` |
+# MAGIC | Etapa atual | Grava `fiap_analytics.bronze.cemaden_rainfall_readings` |
+# MAGIC | Etapa posterior | Silver do CEMADEN (a desenvolver) |
+# MAGIC
+# MAGIC ## 05. Dependências
+# MAGIC
+# MAGIC | Tipo | Item | Uso |
+# MAGIC |---|---|---|
+# MAGIC | Tabela | `fiap_analytics.bronze.cemaden_ingestion_log` | Meses pendentes, arquivo e contagem de cada mês |
+# MAGIC | Volume | `/Volumes/fiap_analytics/bronze/cemaden_rainfall_readings` | Arquivos mensais |
+# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no log |
+# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME no volume | Ler arquivos e gravar a tabela |
+# MAGIC
+# MAGIC ## 06. Parâmetros de entrada
+# MAGIC
+# MAGIC Não aplicável. Os meses pendentes são definidos pelo log; não há widgets.
+# MAGIC
+# MAGIC ## 07. Fontes de dados
+# MAGIC
+# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
+# MAGIC |---|---|---|---|---|---|---|
+# MAGIC | Arquivos mensais registrados no `fiap_analytics.bronze.cemaden_ingestion_log` | JSON por linha (gzip) | Landing do CEMADEN | Incremental por mês | Diária | `codestacao` + `datahora` + `id_sensor` | Meses com landing `SUCESSO` ou `PARCIAL` e registros, posteriores à última carga |
+# MAGIC
+# MAGIC ## 08. Processamento técnico
+# MAGIC
+# MAGIC | Etapa | Linguagem | Célula | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | E01 | PY | Imports | Bibliotecas do notebook. |
+# MAGIC | E02 | PY | Carga | Log de ingestão; seleção dos meses pendentes no log; leitura com schema em texto e `_rescued_data`; conferência da contagem; gravação com `replaceWhere` por `_window`; registro no log e resumo por mês. |
+# MAGIC
+# MAGIC ## 09. Regras de negócio
+# MAGIC
+# MAGIC Não aplicável. O notebook aplica apenas regras técnicas de carga (meses pendentes e substituição da fatia); as regras de negócio das leituras ficam na landing e na futura Silver.
+# MAGIC
+# MAGIC ## 10. Saídas de dados
+# MAGIC
+# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
+# MAGIC |---|---|---|---|---|
+# MAGIC | `fiap_analytics.bronze.cemaden_rainfall_readings` | Delta, particionada por `_window_year` | Uma linha por leitura | `codestacao` + `datahora` + `id_sensor` | `overwrite` com `replaceWhere` por `_window` (AAAAMM) |
+# MAGIC
+# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
+# MAGIC
+# MAGIC ## 11. Qualidade dos dados
+# MAGIC
+# MAGIC Bloqueia a gravação de um mês se o arquivo tiver contagem diferente da registrada na landing. Campos novos vão para `_rescued_data` e aparecem no resumo.
+# MAGIC
+# MAGIC ## 12. Tratamento de erros
+# MAGIC
+# MAGIC | Situação | Comportamento | Registro | Recuperação |
+# MAGIC |---|---|---|---|
+# MAGIC | Mês com falha | Registra `FALHA`, segue para os outros meses e termina com erro | `FALHA` no `fiap_analytics.bronze.cemaden_ingestion_log` | Rodar de novo: o mês continua pendente |
+# MAGIC
+# MAGIC ## 13. Segurança e governança
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Classificação dos dados | Pública (dados da rede observacional do CEMADEN/MCTI; confirmar os termos de uso da PED) |
+# MAGIC | Dados sensíveis | Nenhum nos dados. As credenciais da conta PED são sensíveis |
+# MAGIC | Credenciais | Secret scope `cemaden`, chaves `ped_email` e `ped_password` |
+# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME no volume |
+# MAGIC | Políticas aplicáveis | Termos de uso da API PED do CEMADEN (confirmar); credenciais nunca impressas nem gravadas |
+# MAGIC
+# MAGIC ## 14. Monitoramento e operação
+# MAGIC
+# MAGIC | Item | Valor |
+# MAGIC |---|---|
+# MAGIC | Job e tarefa | `ChuvaSegura - CEMADEN` (`jobs/chuvasegura_cemaden.job.yml`), tarefa `cemaden_rainfall_readings_bronze` |
+# MAGIC | Frequência | Diária, 07:00 (America/Sao_Paulo); agenda pausada até o backfill |
+# MAGIC | SLA | A definir |
+# MAGIC | Métricas | Linhas e estações por mês |
+# MAGIC | Logs | `fiap_analytics.bronze.cemaden_ingestion_log` (etapa `bronze`) |
+# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
+# MAGIC | Reprocessamento | Rodar de novo; um mês baixado de novo na landing volta a ficar pendente |
+# MAGIC
+# MAGIC ## 15. Histórico de alterações
+# MAGIC
+# MAGIC | Versão | Data | Responsável | Descrição |
+# MAGIC |---|---|---|---|
+# MAGIC | 1.0 | 2026-11-10 | juniorOnData | Criação da Bronze de leituras de chuva (PR #6) |
+# MAGIC | 1.1 | 2026-11-16 | juniorOnData | Log de ingestão próprio da origem e carga de meses parciais (PR #8) |
+# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Formato de código fonte, módulo de log compartilhado e novo nome do arquivo (PR #9) |
+# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
 
 # COMMAND ----------
 
+# [PY] E01 Imports
 import os
 import sys
 import uuid
@@ -22,6 +126,7 @@ from pyspark.sql import types as T
 
 # COMMAND ----------
 
+# [PY] E02 Carga
 CATALOGO, SCHEMA = "fiap_analytics", "bronze"
 BRONZE_TABLE = f"{CATALOGO}.{SCHEMA}.cemaden_rainfall_readings"
 ENDPOINT = "/pcds/pcds-dados-pg"
