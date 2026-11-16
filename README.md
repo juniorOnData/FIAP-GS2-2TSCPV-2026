@@ -49,7 +49,7 @@ Situação atual:
 | Fonte | Landing | Bronze | Silver | Gold |
 |---|:-:|:-:|:-:|:-:|
 | CEMADEN | ✅ | ✅ | ✅ | ✅ |
-| SIBH | ✅ | ✅ | ⏳ | ⏳ |
+| SIBH | ✅ | ✅ | ✅ | ✅ |
 | GeoSampa | ✅ | ✅ | ✅ | ✅ |
 
 ## Estrutura do repositório
@@ -90,9 +90,20 @@ src/
 │   ├── ingestion/
 │   │   ├── 01_sibh_stations_landing.py
 │   │   └── 03_sibh_measurements_landing.py
-│   └── transformations/bronze/
-│       ├── 02_sibh_stations_bronze.py
-│       └── 04_sibh_measurements_bronze.py
+│   ├── quality/
+│   │   ├── 05_sibh_silver_quality.py
+│   │   └── 07_sibh_gold_quality.py
+│   └── transformations/
+│       ├── bronze/
+│       │   ├── 02_sibh_stations_bronze.py
+│       │   └── 04_sibh_measurements_bronze.py
+│       ├── silver/
+│       │   ├── 05_sibh_stations_silver.py
+│       │   └── 05_sibh_measurements_silver.py
+│       └── gold/
+│           ├── 06_dim_sibh_sensors.sql
+│           ├── 07_fact_sibh_rainfall_hourly.sql
+│           └── 07_fact_sibh_level_hourly.sql
 └── geosampa/
     ├── ingestion/
     │   ├── 01_geosampa_subprefecture_area_bronze.sql
@@ -180,9 +191,18 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 | 2 | `02_sibh_stations_bronze` | `snapshot_date`: `pending` (padrão), `latest`, `all` ou `AAAA-MM-DD` |
 | 3 | `03_sibh_measurements_landing` | `mode`: `probe`, `backfill` ou `incremental`; `group_type` (`minute`); `min_month` (2020-01); `excluded_owners` (CEMADEN); `min_interval_s` (1.0); `force` |
 | 4 | `04_sibh_measurements_bronze` | `window`: `pending` (padrão), `all` ou `AAAA-MM` |
+| 5 | `05_sibh_stations_silver` | (sem widgets: recria a Silver a partir de todos os snapshots) |
+| 5 | `05_sibh_measurements_silver` | `window`: `pending` (padrão: meses recarregados na Bronze), `all` ou `AAAA-MM` |
+| 5 | `05_sibh_silver_quality` (pasta `quality/`) | (sem widgets) |
+| 6 | `06_dim_sibh_sensors` | (sem widgets) |
+| 7 | `07_fact_sibh_rainfall_hourly` e `07_fact_sibh_level_hourly` | (sem widgets: recarregam os meses novos ou alterados) |
+| 7 | `07_sibh_gold_quality` (pasta `quality/`) | (sem widgets) |
 
 - Os sensores do CEMADEN ficam de fora do SIBH por padrão, porque já vêm pela PED.
 - O modo `probe` faz duas chamadas de teste e mostra a resposta da API sem gravar nada.
+- **Silver dos sensores:** uma linha por sensor (`id` do cadastro). No SIBH, chuva e nível de um mesmo local têm `id` diferentes e o mesmo `cod_estacao`. Só a capital e os tipos 2 (`Chuva`) e 1 (`Nível`), com a versão do snapshot mais recente em que o sensor aparece.
+- **Silver das medições:** `date` da fonte está em UTC e vira `dt_hr_medicao_utc`; `dt_medicao`, `nr_hora` e `cod_dim_data` ficam no fuso de São Paulo. `value` vira `nr_valor` (chuva em mm por medição, ou nível na unidade da fonte), e `dc_grandeza` diz qual dos dois é. Medições duplicadas (mesmo sensor e data e hora) ficam uma só.
+- **Gold:** uma dimensão de sensores e duas fatos por sensor, dia e hora (fuso de São Paulo): `fact_sibh_rainfall_hourly` (chuva somada, maior medição e número de medições) e `fact_sibh_level_hourly` (nível médio, mínimo, máximo e último da hora). As duas têm carga incremental por mês.
 
 ### Dimensão de tempo (compartilhada)
 
@@ -215,7 +235,7 @@ Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YA
 |---|---|---|---|
 | `jobs/chuvasegura_geosampa.job.yml` | `ChuvaSegura` | todo dia às 09:00:30 | ativo |
 | `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | ativo |
-| `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | pausado até o backfill |
+| `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | ativo |
 
 ```mermaid
 flowchart LR
@@ -232,6 +252,20 @@ flowchart LR
   end
   subgraph sibh["ChuvaSegura - SIBH"]
     S1[01_sibh_stations_landing] --> S2[02_sibh_stations_bronze] --> S3[03_sibh_measurements_landing<br/>mode = incremental] --> S4[04_sibh_measurements_bronze]
+    S2 --> S5[05_sibh_stations_silver]
+    S4 --> S6[05_sibh_measurements_silver]
+    S5 --> S6
+    S5 --> SQ1{{05_sibh_silver_quality}}
+    S6 --> SQ1
+    SQ1 --> S7[06_dim_sibh_sensors]
+    SQ1 --> S8[07_fact_sibh_rainfall_hourly]
+    SQ1 --> S9[07_fact_sibh_level_hourly]
+    S7 --> S8
+    S7 --> S9
+    ST[00_dim_tempo] --> S8
+    ST --> S9
+    S8 --> SQ2{{07_sibh_gold_quality}}
+    S9 --> SQ2
   end
   subgraph geosampa["ChuvaSegura (GeoSampa)"]
     G1[01_geosampa_history_flooding_events_bronze] --> G3[02_geosampa_flooding_events_silver]
@@ -308,7 +342,7 @@ As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como 
   - `AVISO`: só registra.
 - **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
 - **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
-- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log` e `fiap_analytics.bronze.cemaden_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log` e `fiap_analytics.bronze.sibh_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
 
 Regras do GeoSampa:
 
@@ -323,6 +357,13 @@ Regras do CEMADEN:
 |---|---|---|
 | Silver | estações: tabela não vazia, código único, latitude e longitude preenchidas e dentro da área de São Paulo; leituras: tabela não vazia, uma linha por chave distinta da Bronze, estação, sensor e data e hora preenchidos, data entre 2010 e agora, chuva não negativa | mais de 1% das leituras com data e hora fora do mês pedido à API (confere a premissa de UTC); mais de 1% sem valor; leituras acima de 50 mm; mais de 1% de leituras de estações fora do cadastro |
 | Gold | fato não vazia; uma linha por estação, sensor, dia e hora; leituras e chuva iguais às da Silver em cada mês; chaves existentes na `dim_tempo` e na dimensão de estações; chuva da hora não negativa; chaves únicas e membro `-1` na dimensão | mais de 1% das horas com estação `-1`; horas acima de 120 mm |
+
+Regras do SIBH:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | sensores: tabela não vazia, sensor único, grandeza, latitude e longitude preenchidas e dentro da área de São Paulo; medições: tabela não vazia, uma linha por chave distinta da Bronze, sensor, grandeza e data e hora preenchidos, data entre 2010 e agora, chuva não negativa | mais de 1% das medições com data e hora fora do mês pedido à API (confere a premissa de UTC); mais de 1% sem valor; chuva acima de 50 mm numa medição; mais de 1% de medições de sensores fora do cadastro |
+| Gold | as duas fatos não vazias, com uma linha por sensor, dia e hora, medições iguais às da Silver em cada mês e chaves existentes na `dim_tempo` e na dimensão de sensores; chuva igual à da Silver em cada mês e não negativa; nível mínimo, médio e máximo coerentes; chaves únicas e membro `-1` na dimensão | mais de 1% das horas com sensor `-1`; horas de chuva acima de 120 mm; sensor de chuva na fato de nível |
 
 Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
 
@@ -345,12 +386,18 @@ ORDER BY executado_em DESC;
 | bronze | `geosampa_subprefecture_area` | Subprefeituras e agrupamentos (Anexo IX) |
 | bronze | `geosampa_data_quality_log` | Resultados das regras de qualidade do GeoSampa |
 | bronze | `cemaden_data_quality_log` | Resultados das regras de qualidade do CEMADEN |
+| bronze | `sibh_data_quality_log` | Resultados das regras de qualidade do SIBH |
+| silver | `sibh_stations` | Sensores de chuva e nível do SIBH na capital, uma linha por sensor, tipados |
+| silver | `sibh_measurements` | Medições de chuva e nível tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `cemaden_stations` | Estações do CEMADEN no município, uma linha por estação, tipadas |
 | silver | `cemaden_rainfall_readings` | Leituras de chuva tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_cemaden_stations` | Dimensão de estações do CEMADEN, com o membro `-1` (não informado) |
 | gold | `fact_cemaden_rainfall_hourly` | Fato de chuva por estação, sensor, dia e hora |
+| gold | `dim_sibh_sensors` | Dimensão de sensores do SIBH (chuva e nível), com o membro `-1` (não informado) |
+| gold | `fact_sibh_rainfall_hourly` | Fato de chuva por sensor, dia e hora |
+| gold | `fact_sibh_level_hourly` | Fato de nível por sensor, dia e hora (médio, mínimo, máximo e último) |
 | gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras, com o membro `-1` (não informado) |
 | gold | `dim_geosampa_type_flooding_events` | Dimensão de tipos de ocorrência, com o membro `-1` (não informado) |
 | gold | `fact_geosampa_flooding_events` | Fato de ocorrências (uma linha por ocorrência) por data, tipo e subprefeitura, com latitude e longitude |
@@ -362,7 +409,6 @@ ORDER BY executado_em DESC;
 
 ## Próximos passos
 
-- Silver e Gold do SIBH (chuva e nível).
 - Cruzamento da chuva e do nível com as ocorrências do GeoSampa.
 
 ## Fontes dos dados
