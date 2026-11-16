@@ -36,8 +36,13 @@ resources:
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/03_dim_geosampa_type_flooding_events
             source: WORKSPACE
+        - task_key: dim_tempo
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/shared/transformations/gold/00_dim_tempo
+            source: WORKSPACE
         - task_key: gold_geosampa_flooding_events
           depends_on:
+            - task_key: dim_tempo
             - task_key: dim_geosampa_type_flooding_events
             - task_key: dim_geosampa_subprefecture_area
             - task_key: silver_geosampa_flooding_events

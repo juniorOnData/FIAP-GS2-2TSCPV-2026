@@ -64,6 +64,9 @@ jobs/                                             # definição dos jobs do Data
 src/
 ├── common/
 │   └── ingestion_log.py                          # log de ingestão padrão (módulo Python)
+├── shared/
+│   └── transformations/gold/
+│       └── 00_dim_tempo.sql                      # dimensão de tempo compartilhada pelas fatos
 ├── cemaden/
 │   ├── ingestion/
 │   │   ├── 01_cemaden_stations_landing.py
@@ -157,6 +160,10 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - Os sensores do CEMADEN ficam de fora do SIBH por padrão, porque já vêm pela PED.
 - O modo `probe` faz duas chamadas de teste e mostra a resposta da API sem gravar nada.
 
+### Dimensão de tempo (compartilhada)
+
+`00_dim_tempo` cria e mantém a `fiap_analytics.gold.dim_tempo`: um dia por linha, de 2010 até o fim do ano seguinte, com chave `COD_DIM_TEMPO` no formato `yyyyMMdd`. É a única dimensão compartilhada entre as fontes. Toda fato do projeto usa essa chave, e fatos com granularidade menor que o dia (chuva por hora, por exemplo) guardam a hora na própria fato. O notebook roda no job `ChuvaSegura`, antes da fato do GeoSampa, e cada execução só acrescenta os dias que faltam.
+
 ### GeoSampa
 
 | # | Notebook | Depende de |
@@ -166,9 +173,10 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 | 2 | `02_geosampa_flooding_events_silver` | os dois passos 1 |
 | 3 | `03_dim_geosampa_subprefecture_area` | subprefeituras (Bronze) |
 | 3 | `03_dim_geosampa_type_flooding_events` | Silver |
-| 4 | `04_fact_geosampa_flooding_events` | Silver e as duas dimensões |
+| 4 | `04_fact_geosampa_flooding_events` | Silver, as duas dimensões e a `dim_tempo` |
 
 - Arquivos que já foram carregados (mesmo SHA256) são pulados.
+- A Silver converte a geometria (POINT em WKB, SIRGAS 2000 / UTM 23S, EPSG 31983) em coordenadas UTM e em latitude e longitude. A conversão é uma UDF Python registrada no próprio notebook, e a última célula confere quantos pontos ficaram sem coordenada ou fora da área de São Paulo.
 - A Gold recarrega só os anos de origem novos ou alterados.
 
 ## Jobs e workflows
@@ -199,6 +207,7 @@ flowchart LR
     G3 --> G6[04_fact_geosampa_flooding_events]
     G4 --> G6
     G5 --> G6
+    T0[00_dim_tempo] --> G6
   end
 ```
 
@@ -263,7 +272,8 @@ LIMIT 50;
 | bronze | `sibh_measurements` | Medições de chuva e nível do SIBH na capital, uma fatia por mês |
 | bronze | `geosampa_history_flooding_events` | Ocorrências do GeoSampa, com a geometria em WKB |
 | bronze | `geosampa_subprefecture_area` | Subprefeituras e agrupamentos (Anexo IX) |
-| silver | `fact_geosampa_flooding_events` | Ocorrências com data, tipo e subprefeitura padronizados |
+| silver | `fact_geosampa_flooding_events` | Ocorrências com data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
+| gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras |
 | gold | `dim_geosampa_type_flooding_events` | Dimensão de tipos de ocorrência |
 | gold | `fact_geosampa_flooding_events` | Fato de ocorrências por data, tipo e subprefeitura |
