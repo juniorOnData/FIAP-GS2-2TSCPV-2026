@@ -179,6 +179,7 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - Um arquivo por ano no volume. Para corrigir um ano, troque o arquivo no volume pela versão nova e rode o job: a carga grava a versão nova e remove as linhas da anterior. Se houver dois arquivos do mesmo ano, a carga para e pede para deixar só um.
 - A Silver converte a geometria (POINT ou POINT Z em WKB, conforme o ano do arquivo; SIRGAS 2000 / UTM 23S, EPSG 31983) em coordenadas UTM e em latitude e longitude. A conversão é uma UDF Python registrada no próprio notebook, e a última célula confere quantos pontos ficaram sem coordenada ou fora da área de São Paulo.
 - A Gold recarrega só os anos de origem novos ou alterados.
+- **Modelo da Gold:** estrela com a fato `fact_geosampa_flooding_events` e as dimensões `dim_tempo`, `dim_geosampa_type_flooding_events` e `dim_geosampa_subprefecture_area`. Cada ocorrência é identificada por `NUM_ANO_ORIGEM` + `NUM_ID_OCORRENCIA` (número da ocorrência no arquivo do ano; no arquivo de 2026 ele vem na coluna `primaryindex`). Tipo ou subprefeitura não encontrados vão para o membro `-1` (não informado), então a fato nunca tem chave nula. As chaves estrangeiras são declaradas (informativas no Unity Catalog) e a fato usa liquid clustering por data e subprefeitura.
 
 ## Jobs e workflows
 
@@ -203,7 +204,6 @@ flowchart LR
     G1[01_geosampa_history_flooding_events_bronze] --> G3[02_geosampa_flooding_events_silver]
     G2[01_geosampa_subprefecture_area_bronze] --> G3
     G2 --> G4[03_dim_geosampa_subprefecture_area]
-    G3 --> G4
     G3 --> G5[03_dim_geosampa_type_flooding_events]
     G3 --> G6[04_fact_geosampa_flooding_events]
     G4 --> G6
@@ -273,11 +273,11 @@ LIMIT 50;
 | bronze | `sibh_measurements` | Medições de chuva e nível do SIBH na capital, uma fatia por mês |
 | bronze | `geosampa_history_flooding_events` | Ocorrências do GeoSampa, com a geometria em WKB |
 | bronze | `geosampa_subprefecture_area` | Subprefeituras e agrupamentos (Anexo IX) |
-| silver | `fact_geosampa_flooding_events` | Ocorrências com data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
+| silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
-| gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras |
-| gold | `dim_geosampa_type_flooding_events` | Dimensão de tipos de ocorrência |
-| gold | `fact_geosampa_flooding_events` | Fato de ocorrências por data, tipo e subprefeitura |
+| gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras, com o membro `-1` (não informado) |
+| gold | `dim_geosampa_type_flooding_events` | Dimensão de tipos de ocorrência, com o membro `-1` (não informado) |
+| gold | `fact_geosampa_flooding_events` | Fato de ocorrências (uma linha por ocorrência) por data, tipo e subprefeitura, com latitude e longitude |
 
 ## Desenvolvimento
 

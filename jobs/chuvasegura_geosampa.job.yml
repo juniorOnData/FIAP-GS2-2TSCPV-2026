@@ -26,7 +26,6 @@ resources:
         - task_key: dim_geosampa_subprefecture_area
           depends_on:
             - task_key: ingestion_subprefecture_area
-            - task_key: silver_geosampa_flooding_events
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/03_dim_geosampa_subprefecture_area
             source: WORKSPACE

@@ -2,7 +2,7 @@
 -- MAGIC %md
 -- MAGIC # 02_geosampa_flooding_events_silver
 -- MAGIC
--- MAGIC Recria a Silver das ocorrências do GeoSampa: data tipada, tipo de ocorrência padronizado, subprefeitura relacionada pela sigla do GeoSampa (ou, se não houver, pela sigla do Anexo IX) e localização do ponto.
+-- MAGIC Recria a Silver das ocorrências do GeoSampa (`fiap_analytics.silver.geosampa_flooding_events`): identificador da ocorrência, data tipada, tipo de ocorrência padronizado, subprefeitura relacionada pela sigla do GeoSampa (ou, se não houver, pela sigla do Anexo IX) e localização do ponto.
 -- MAGIC
 -- MAGIC Localização: a Bronze guarda a geometria em WKB (`geom_wkb`), um POINT ou POINT Z (varia conforme o ano do arquivo) em SIRGAS 2000 / UTM 23S (`_source_srs_id = 31983`, lido dos metadados do GeoPackage). A Silver mantém o WKB e acrescenta as coordenadas UTM (metros, boas para calcular distâncias) e a latitude e longitude em graus (SIRGAS 2000, equivalente ao WGS84 para este uso).
 
@@ -84,9 +84,11 @@
 
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE fiap_analytics.silver.fact_geosampa_flooding_events AS
+CREATE OR REPLACE TABLE fiap_analytics.silver.geosampa_flooding_events AS
   WITH history_flooding_events AS (
     SELECT
+      -- Número da ocorrência dentro do arquivo do ano. O arquivo de 2026 usa a coluna primaryindex no lugar de id.
+      TRY_CAST(COALESCE(id, primaryindex) AS BIGINT) AS nr_id_ocorrencia,
       CAST(data AS DATE) AS dt_ocorrencia,
       CAST(DATE_FORMAT(CAST(data AS DATE), "yyyyMMdd") AS BIGINT) AS cod_dim_data,
       CASE
@@ -111,6 +113,7 @@ CREATE OR REPLACE TABLE fiap_analytics.silver.fact_geosampa_flooding_events AS
   ),
   ajuste_subprefecture AS (
     SELECT
+      nr_id_ocorrencia,
       dt_ocorrencia,
       cod_dim_data,
       dc_tipo_ocorrencia,
@@ -134,6 +137,7 @@ CREATE OR REPLACE TABLE fiap_analytics.silver.fact_geosampa_flooding_events AS
       history_flooding_events
   )
   SELECT
+    f.nr_id_ocorrencia,
     f.dt_ocorrencia,
     f.cod_dim_data,
     f.dc_tipo_ocorrencia,
@@ -171,4 +175,4 @@ SELECT
   MAX(nr_latitude)                                                 AS lat_max,
   MIN(nr_longitude)                                                AS lon_min,
   MAX(nr_longitude)                                                AS lon_max
-FROM fiap_analytics.silver.fact_geosampa_flooding_events
+FROM fiap_analytics.silver.geosampa_flooding_events
