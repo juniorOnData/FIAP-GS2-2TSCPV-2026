@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Notebooks e IDEs
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Databricks CLI / Asset Bundles
+.databricks/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Dados locais (os dados ficam nos volumes do Unity Catalog, não no repositório)
+*.gpkg
+*.json.gz
