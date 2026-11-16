@@ -3,38 +3,53 @@
 -- MAGIC # 04_fact_geosampa_flooding_events
 -- MAGIC
 -- MAGIC Fato de ocorrências por data, tipo e subprefeitura. Recarrega só os anos de origem novos ou alterados na Silver e remove os que saíram dela.
+-- MAGIC
+-- MAGIC Regras:
+-- MAGIC
+-- MAGIC 1. Uma linha por ocorrência. A ocorrência é identificada por `NUM_ANO_ORIGEM` + `NUM_ID_OCORRENCIA` (número da ocorrência dentro do arquivo do ano).
+-- MAGIC 2. Chaves de dimensão nunca nulas: tipo ou subprefeitura não encontrados vão para o membro `-1` (não informado) da dimensão.
+-- MAGIC 3. Latitude e longitude da ocorrência ficam na fato, para mapas e para o cruzamento com as estações de chuva.
+-- MAGIC 4. Chaves estrangeiras declaradas para a `dim_tempo` e as dimensões do GeoSampa (informativas no Unity Catalog). Tabela com liquid clustering por data e subprefeitura.
 
 -- COMMAND ----------
 
 CREATE TABLE IF NOT EXISTS fiap_analytics.gold.fact_geosampa_flooding_events (
-  COD_FATO_OCORRENCIA    BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1)
+  COD_FATO_OCORRENCIA    BIGINT    GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1)
     COMMENT 'Chave substituta numerica da linha',
-  COD_DIM_TEMPO          BIGINT    COMMENT 'Data no formato yyyyMMdd',
-  COD_DIM_OCORRENCIA     BIGINT    COMMENT 'Chave da dimensao de tipos de ocorrencia',
-  COD_DIM_SUBPREFEITURA  BIGINT    COMMENT 'Chave da dimensao de subprefeituras',
-  YEAR_PARTITION         STRING    COMMENT 'Ano da ocorrencia',
-  MONTH_PARTITION        STRING    COMMENT 'Mes da ocorrencia',
-  DAY_PARTITION          STRING    COMMENT 'Dia da ocorrencia',
-  NUM_ANO_ORIGEM         INT       COMMENT 'Ano do arquivo de origem (controle da carga incremental)',
+  NUM_ANO_ORIGEM         INT       NOT NULL COMMENT 'Ano do arquivo de origem (controle da carga incremental)',
+  NUM_ID_OCORRENCIA      BIGINT    NOT NULL COMMENT 'Numero da ocorrencia dentro do arquivo do ano (com NUM_ANO_ORIGEM, identifica a ocorrencia)',
+  COD_DIM_TEMPO          BIGINT    NOT NULL COMMENT 'Data da ocorrencia no formato yyyyMMdd (dim_tempo)',
+  COD_DIM_OCORRENCIA     BIGINT    NOT NULL COMMENT 'Chave da dimensao de tipos de ocorrencia (-1 = nao informado)',
+  COD_DIM_SUBPREFEITURA  BIGINT    NOT NULL COMMENT 'Chave da dimensao de subprefeituras (-1 = nao informado)',
+  NUM_LATITUDE           DOUBLE    COMMENT 'Latitude da ocorrencia em graus (SIRGAS 2000)',
+  NUM_LONGITUDE          DOUBLE    COMMENT 'Longitude da ocorrencia em graus (SIRGAS 2000)',
   DAT_INGESTAO_BRONZE    TIMESTAMP COMMENT 'Data e hora da ingestao na Bronze',
-  DAT_CARGA_FATO         TIMESTAMP COMMENT 'Data e hora da carga desta tabela'
+  DAT_CARGA_FATO         TIMESTAMP COMMENT 'Data e hora da carga desta tabela',
+  CONSTRAINT pk_fact_geosampa_flooding_events PRIMARY KEY (COD_FATO_OCORRENCIA),
+  CONSTRAINT fk_fact_geosampa_dim_tempo FOREIGN KEY (COD_DIM_TEMPO)
+    REFERENCES fiap_analytics.gold.dim_tempo (COD_DIM_TEMPO),
+  CONSTRAINT fk_fact_geosampa_dim_ocorrencia FOREIGN KEY (COD_DIM_OCORRENCIA)
+    REFERENCES fiap_analytics.gold.dim_geosampa_type_flooding_events (COD_DIM_OCORRENCIA),
+  CONSTRAINT fk_fact_geosampa_dim_subprefeitura FOREIGN KEY (COD_DIM_SUBPREFEITURA)
+    REFERENCES fiap_analytics.gold.dim_geosampa_subprefecture_area (COD_DIM_SUBPREFEITURA)
 )
+CLUSTER BY (COD_DIM_TEMPO, COD_DIM_SUBPREFEITURA)
 COMMENT 'Fato de ocorrencias por tipo e subprefeitura de Sao Paulo (GeoSampa), carga incremental por ano';
 
 -- COMMAND ----------
 
 CREATE OR REPLACE TEMP VIEW stg_fact_geosampa_flooding_events AS
 SELECT
-  f.cod_dim_data AS COD_DIM_TEMPO,
-  d.COD_DIM_OCORRENCIA,
-  a.COD_DIM_SUBPREFEITURA,
-  CAST(YEAR(f.dt_ocorrencia) AS STRING)  AS YEAR_PARTITION,
-  CAST(MONTH(f.dt_ocorrencia) AS STRING) AS MONTH_PARTITION,
-  CAST(DAY(f.dt_ocorrencia) AS STRING)   AS DAY_PARTITION,
   f._source_year                         AS NUM_ANO_ORIGEM,
+  f.nr_id_ocorrencia                     AS NUM_ID_OCORRENCIA,
+  f.cod_dim_data                         AS COD_DIM_TEMPO,
+  COALESCE(d.COD_DIM_OCORRENCIA, -1)     AS COD_DIM_OCORRENCIA,
+  COALESCE(a.COD_DIM_SUBPREFEITURA, -1)  AS COD_DIM_SUBPREFEITURA,
+  f.nr_latitude                          AS NUM_LATITUDE,
+  f.nr_longitude                         AS NUM_LONGITUDE,
   f._ingested_at                         AS DAT_INGESTAO_BRONZE
 FROM
-  fiap_analytics.silver.fact_geosampa_flooding_events f
+  fiap_analytics.silver.geosampa_flooding_events f
   LEFT JOIN fiap_analytics.gold.dim_geosampa_type_flooding_events d ON
     f.dc_tipo_ocorrencia = d.DSC_TIPO_OCORRENCIA
   LEFT JOIN fiap_analytics.gold.dim_geosampa_subprefecture_area a ON
@@ -48,7 +63,8 @@ CREATE OR REPLACE TEMP VIEW resumo_ano_silver AS
 SELECT
   COALESCE(NUM_ANO_ORIGEM, -1) AS ANO,
   COUNT(*) AS LINHAS,
-  SUM(CAST(xxhash64(COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA, DAT_INGESTAO_BRONZE) AS DECIMAL(38, 0))) AS ASSINATURA
+  SUM(CAST(xxhash64(NUM_ID_OCORRENCIA, COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA,
+                    NUM_LATITUDE, NUM_LONGITUDE, DAT_INGESTAO_BRONZE) AS DECIMAL(38, 0))) AS ASSINATURA
 FROM stg_fact_geosampa_flooding_events
 GROUP BY ALL;
 
@@ -56,7 +72,8 @@ CREATE OR REPLACE TEMP VIEW resumo_ano_gold AS
 SELECT
   COALESCE(NUM_ANO_ORIGEM, -1) AS ANO,
   COUNT(*) AS LINHAS,
-  SUM(CAST(xxhash64(COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA, DAT_INGESTAO_BRONZE) AS DECIMAL(38, 0))) AS ASSINATURA
+  SUM(CAST(xxhash64(NUM_ID_OCORRENCIA, COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA,
+                    NUM_LATITUDE, NUM_LONGITUDE, DAT_INGESTAO_BRONZE) AS DECIMAL(38, 0))) AS ASSINATURA
 FROM fiap_analytics.gold.fact_geosampa_flooding_events
 GROUP BY ALL;
 
@@ -86,21 +103,10 @@ WHERE array_contains(anos_recarga, COALESCE(NUM_ANO_ORIGEM, -1))
 -- COMMAND ----------
 
 INSERT INTO fiap_analytics.gold.fact_geosampa_flooding_events
-  (COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA,
-   YEAR_PARTITION, MONTH_PARTITION, DAY_PARTITION,
-   NUM_ANO_ORIGEM, DAT_INGESTAO_BRONZE, DAT_CARGA_FATO)
+  (NUM_ANO_ORIGEM, NUM_ID_OCORRENCIA, COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA,
+   NUM_LATITUDE, NUM_LONGITUDE, DAT_INGESTAO_BRONZE, DAT_CARGA_FATO)
 SELECT
-  COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA,
-  YEAR_PARTITION, MONTH_PARTITION, DAY_PARTITION,
-  NUM_ANO_ORIGEM, DAT_INGESTAO_BRONZE, current_timestamp()
+  NUM_ANO_ORIGEM, NUM_ID_OCORRENCIA, COD_DIM_TEMPO, COD_DIM_OCORRENCIA, COD_DIM_SUBPREFEITURA,
+  NUM_LATITUDE, NUM_LONGITUDE, DAT_INGESTAO_BRONZE, current_timestamp()
 FROM stg_fact_geosampa_flooding_events
 WHERE array_contains(anos_recarga, COALESCE(NUM_ANO_ORIGEM, -1));
-
--- COMMAND ----------
-
-BEGIN
-  IF DAY(from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo')) IN (1, 15) THEN
-    OPTIMIZE fiap_analytics.gold.fact_geosampa_flooding_events
-    ZORDER BY (COD_DIM_TEMPO, COD_DIM_SUBPREFEITURA);
-  END IF;
-END
