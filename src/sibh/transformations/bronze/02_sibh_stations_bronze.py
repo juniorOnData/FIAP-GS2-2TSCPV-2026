@@ -1,137 +1,31 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # SIB_BRZ_001 02_sibh_stations_bronze
+# MAGIC # 02_sibh_stations_bronze
 # MAGIC
-# MAGIC ## 01. Identificação
+# MAGIC Carrega o cadastro de estações do SIBH do volume `fiap_analytics.bronze.sibh_stations` para a tabela `fiap_analytics.bronze.sibh_stations`.
 # MAGIC
-# MAGIC | Campo | Valor |
-# MAGIC |---|---|
-# MAGIC | Identificador | SIB_BRZ_001 |
-# MAGIC | Nome | 02_sibh_stations_bronze |
-# MAGIC | Projeto | ChuvaSegura |
-# MAGIC | Domínio de negócio | Hidrologia (SIBH) |
-# MAGIC | Camada | Bronze |
-# MAGIC | Linguagem | Python |
-# MAGIC | Responsável técnico | juniorOnData |
-# MAGIC | Responsável funcional | A definir |
-# MAGIC | Status | Homologação |
-# MAGIC | Versão | 1.3 |
-# MAGIC | Criticidade | Média |
-# MAGIC | Caminho no repositório | `src/sibh/transformations/bronze/02_sibh_stations_bronze.py` |
+# MAGIC Regras:
 # MAGIC
-# MAGIC ## 02. Objetivo
+# MAGIC 1. Tudo em string e sem filtros: a tabela guarda o estado inteiro, de todas as instituições. O recorte (capital, tipo, dono) fica na Silver.
+# MAGIC 2. Cada coleta é um snapshot, identificado por `_snapshot_date`. O histórico de snapshots fica na tabela (permite ver estações ativadas e desativadas ao longo do tempo).
+# MAGIC 3. Idempotência por data: a fatia do snapshot é substituída com `replaceWhere`. Por isso não se usa Auto Loader.
+# MAGIC 4. Só entram arquivos que têm manifesto (o manifesto é gravado depois do arquivo de dados).
+# MAGIC 5. Conferência: linhas lidas de cada arquivo precisam bater com o `record_count` do manifesto, e as linhas na tabela precisam bater com as lidas.
+# MAGIC 6. Campos que não estiverem no schema esperado vão para `_rescued_data` (nada se perde).
 # MAGIC
-# MAGIC Carregar as coletas do cadastro de estações do SIBH na tabela Bronze, com um snapshot por data de coleta e conferência contra o manifesto.
+# MAGIC Widget `snapshot_date`:
 # MAGIC
-# MAGIC ## 03. Contexto funcional
-# MAGIC
-# MAGIC É de onde a landing de medições lê os sensores da capital a coletar.
-# MAGIC
-# MAGIC ## 04. Arquitetura e fluxo
-# MAGIC
-# MAGIC | Posição | Item |
-# MAGIC |---|---|
-# MAGIC | Etapa anterior | `01_sibh_stations_landing` |
-# MAGIC | Etapa atual | Grava `fiap_analytics.bronze.sibh_stations` |
-# MAGIC | Etapa posterior | `03_sibh_measurements_landing` |
-# MAGIC
-# MAGIC ## 05. Dependências
-# MAGIC
-# MAGIC | Tipo | Item | Uso |
-# MAGIC |---|---|---|
-# MAGIC | Volume | `/Volumes/fiap_analytics/bronze/sibh_stations` | Arquivos e manifestos |
-# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no log |
-# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME no volume | Ler arquivos e gravar a tabela |
-# MAGIC
-# MAGIC ## 06. Parâmetros de entrada
-# MAGIC
-# MAGIC | Nome | Tipo | Obrigatório | Descrição | Valor padrão | Exemplo |
-# MAGIC |---|---|---|---|---|---|
-# MAGIC | `snapshot_date` | text (texto) | Não | `pending`, `latest`, `all` ou uma data `AAAA-MM-DD` | pending | 2026-11-16 |
-# MAGIC
-# MAGIC ## 07. Fontes de dados
-# MAGIC
-# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
-# MAGIC |---|---|---|---|---|---|---|
-# MAGIC | Volume `sibh_stations`, arquivos com manifesto | JSON por linha (gzip) | Landing do SIBH | Por data de coleta | Diária | `id` + `_snapshot_date` | Conforme `snapshot_date` |
-# MAGIC
-# MAGIC ## 08. Processamento técnico
-# MAGIC
-# MAGIC | Etapa | Linguagem | Célula | Descrição |
-# MAGIC |---|---|---|---|
-# MAGIC | E01 | PY | Parâmetros | Widget `snapshot_date`. |
-# MAGIC | E02 | PY | Configuração | Imports, constantes, campos esperados do cadastro e schema em texto. |
-# MAGIC | E03 | PY | Log de ingestão | Importa o `IngestionLog` e define `registrar` (etapa `bronze`). |
-# MAGIC | E04 | PY | Arquivos a carregar | Lista as coletas com manifesto e escolhe as datas conforme o parâmetro. |
-# MAGIC | E05 | PY | Leitura e metadados | Lê o JSON com schema fixo e `_rescued_data`, junta o manifesto e acrescenta as colunas de controle. |
-# MAGIC | E06 | PY | Validações | Contagem por arquivo contra o manifesto, metadados preenchidos, `id` presente e aviso de campos fora do schema. |
-# MAGIC | E07 | PY | Gravação | Cria a tabela ou substitui a fatia das datas com `replaceWhere`, confere a contagem e registra o log. |
-# MAGIC | E08 | PY | Estações candidatas | Sensores da capital de chuva e nível, fora o CEMADEN, por instituição e situação. |
-# MAGIC
-# MAGIC ## 09. Regras de negócio
-# MAGIC
-# MAGIC | ID | Regra | Lógica | Comportamento esperado |
-# MAGIC |---|---|---|---|
-# MAGIC | RN_SIB_005 | Cadastro como snapshot diário | A fatia de cada `_snapshot_date` é substituída inteira na recarga. | Uma versão do cadastro por data de coleta. |
-# MAGIC
-# MAGIC ## 10. Saídas de dados
-# MAGIC
-# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
-# MAGIC |---|---|---|---|---|
-# MAGIC | `fiap_analytics.bronze.sibh_stations` | Delta | Uma linha por sensor e data de coleta | `id` + `_snapshot_date` | `overwrite` com `replaceWhere` por `_snapshot_date` |
-# MAGIC
-# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
-# MAGIC
-# MAGIC ## 11. Qualidade dos dados
-# MAGIC
-# MAGIC Bloqueia a carga se a contagem divergir do manifesto, se faltar metadado de coleta ou se houver linha sem `id`. Campos novos vão para `_rescued_data` e geram aviso.
-# MAGIC
-# MAGIC ## 12. Tratamento de erros
-# MAGIC
-# MAGIC | Situação | Comportamento | Registro | Recuperação |
-# MAGIC |---|---|---|---|
-# MAGIC | Nenhuma coleta no volume | Para com erro | Saída da tarefa | Rodar antes a landing |
-# MAGIC | Validação reprovada | Para com erro | `FALHA` no `fiap_analytics.bronze.sibh_ingestion_log` | Corrigir e rodar de novo com a data afetada |
-# MAGIC
-# MAGIC ## 13. Segurança e governança
-# MAGIC
-# MAGIC | Item | Valor |
-# MAGIC |---|---|
-# MAGIC | Classificação dos dados | Pública (API pública do SIBH, SP Águas; confirmar os termos de uso) |
-# MAGIC | Dados sensíveis | Nenhum |
-# MAGIC | Credenciais | Nenhuma (API pública, sem autenticação) |
-# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME no volume |
-# MAGIC | Políticas aplicáveis | Termos de uso dos dados do SIBH (confirmar) |
-# MAGIC
-# MAGIC ## 14. Monitoramento e operação
-# MAGIC
-# MAGIC | Item | Valor |
-# MAGIC |---|---|
-# MAGIC | Job e tarefa | `ChuvaSegura - SIBH` (`jobs/chuvasegura_sibh.job.yml`), tarefa `sibh_stations_bronze` |
-# MAGIC | Frequência | Diária, 07:30 (America/Sao_Paulo); agenda pausada até o backfill |
-# MAGIC | SLA | A definir |
-# MAGIC | Métricas | Linhas por snapshot |
-# MAGIC | Logs | `fiap_analytics.bronze.sibh_ingestion_log` (etapa `bronze`) |
-# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
-# MAGIC | Reprocessamento | `snapshot_date = all` ou a data desejada |
-# MAGIC
-# MAGIC ## 15. Histórico de alterações
-# MAGIC
-# MAGIC | Versão | Data | Responsável | Descrição |
-# MAGIC |---|---|---|---|
-# MAGIC | 1.0 | 2026-11-16 | juniorOnData | Criação do notebook (commit `2a2af58`, sem PR) |
-# MAGIC | 1.1 | 2026-11-16 | juniorOnData | Log de ingestão próprio da origem, no formato padrão (PR #8) |
-# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Formato de código fonte, módulo de log compartilhado e novo nome do arquivo (PR #9) |
-# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
+# MAGIC 1. `pending` (padrão): coletas que ainda não estão na Bronze, ou que foram recoletadas depois da última carga.
+# MAGIC 2. `latest`: só a coleta mais recente.
+# MAGIC 3. `all`: recarrega todas as coletas do volume.
+# MAGIC 4. `AAAA-MM-DD`: uma data específica.
 
 # COMMAND ----------
 
-# [PY] E01 Parâmetros
 dbutils.widgets.text("snapshot_date", "pending", "Snapshot: pending, latest, all ou AAAA-MM-DD")
 
 # COMMAND ----------
 
-# [PY] E02 Configuração
 import json
 import os
 import sys
@@ -189,7 +83,6 @@ print(f"batch_id={BATCH_ID} | snapshot={SNAPSHOT_ARG}")
 
 # COMMAND ----------
 
-# [PY] E03 Log de ingestão
 # Log padrão da origem (src/common/ingestion_log.py). Sobe pelas pastas até achar src/ para importar o módulo.
 _src = os.getcwd()
 while not os.path.isdir(os.path.join(_src, "common")) and os.path.dirname(_src) != _src:
@@ -212,7 +105,6 @@ registrar = IngestionLog(spark, LOG_TABLE, FONTE, ETAPA, BATCH_ID).registrar
 
 # COMMAND ----------
 
-# [PY] E04 Arquivos a carregar
 def list_landing_files():
     """Lista (snapshot_date, caminho_do_arquivo, manifesto) de todas as coletas completas no volume."""
     found = []
@@ -283,7 +175,6 @@ for _, p, m in selected:
 
 # COMMAND ----------
 
-# [PY] E05 Leitura e metadados
 manifest_df = spark.createDataFrame(
     [(m["file_name"], m["collected_at_utc"], m.get("landing_batch_id")) for _, _, m in selected],
     "_file_name string, collected_at_utc string, landing_batch_id string",
@@ -328,7 +219,6 @@ bronze_df = (
 
 # COMMAND ----------
 
-# [PY] E06 Validações
 # 1. Contagem por arquivo contra o manifesto.
 read_counts = {
     r["file_name"]: r["n"]
@@ -375,7 +265,6 @@ print(f"Validações OK: {total_read} linhas em {len(dates)} snapshot(s)")
 
 # COMMAND ----------
 
-# [PY] E07 Gravação
 try:
     if not spark.catalog.tableExists(BRONZE_TABLE):
         (bronze_df.write.format("delta").mode("overwrite")
@@ -426,7 +315,6 @@ finally:
 
 # COMMAND ----------
 
-# [PY] E08 Estações candidatas
 latest = max(dates)
 display(spark.sql(f"""
     SELECT
