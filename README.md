@@ -176,7 +176,7 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 | 4 | `04_fact_geosampa_flooding_events` | Silver, as duas dimensões e a `dim_tempo` |
 
 - Arquivos que já foram carregados (mesmo SHA256) são pulados.
-- A Silver converte a geometria (POINT em WKB, SIRGAS 2000 / UTM 23S, EPSG 31983) em coordenadas UTM e em latitude e longitude. A conversão é uma UDF Python registrada no próprio notebook, e a última célula confere quantos pontos ficaram sem coordenada ou fora da área de São Paulo.
+- A Silver converte a geometria (POINT ou POINT Z em WKB, conforme o ano do arquivo; SIRGAS 2000 / UTM 23S, EPSG 31983) em coordenadas UTM e em latitude e longitude. A conversão é uma UDF Python registrada no próprio notebook, e a última célula confere quantos pontos ficaram sem coordenada ou fora da área de São Paulo.
 - A Gold recarrega só os anos de origem novos ou alterados.
 
 ## Jobs e workflows
