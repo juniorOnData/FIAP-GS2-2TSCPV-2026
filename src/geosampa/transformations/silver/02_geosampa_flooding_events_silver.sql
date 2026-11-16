@@ -4,7 +4,7 @@
 -- MAGIC
 -- MAGIC Recria a Silver das ocorrências do GeoSampa: data tipada, tipo de ocorrência padronizado, subprefeitura relacionada pela sigla do GeoSampa (ou, se não houver, pela sigla do Anexo IX) e localização do ponto.
 -- MAGIC
--- MAGIC Localização: a Bronze guarda a geometria em WKB (`geom_wkb`), um POINT em SIRGAS 2000 / UTM 23S (`_source_srs_id = 31983`, lido dos metadados do GeoPackage). A Silver mantém o WKB e acrescenta as coordenadas UTM (metros, boas para calcular distâncias) e a latitude e longitude em graus (SIRGAS 2000, equivalente ao WGS84 para este uso).
+-- MAGIC Localização: a Bronze guarda a geometria em WKB (`geom_wkb`), um POINT ou POINT Z (varia conforme o ano do arquivo) em SIRGAS 2000 / UTM 23S (`_source_srs_id = 31983`, lido dos metadados do GeoPackage). A Silver mantém o WKB e acrescenta as coordenadas UTM (metros, boas para calcular distâncias) e a latitude e longitude em graus (SIRGAS 2000, equivalente ao WGS84 para este uso).
 
 -- COMMAND ----------
 
@@ -53,7 +53,12 @@
 -- MAGIC
 -- MAGIC
 -- MAGIC def ponto_wkb_para_coordenadas(wkb, srs_id):
--- MAGIC     """WKB de um POINT em EPSG:31983 -> (x, y, latitude, longitude). Outros tipos ou SRIDs devolvem None."""
+-- MAGIC     """WKB de um POINT em EPSG:31983 -> (x, y, latitude, longitude). Outros tipos ou SRIDs devolvem None.
+-- MAGIC
+-- MAGIC     Aceita POINT 2D, Z, M e ZM, nos códigos ISO (1, 1001, 2001, 3001) e nas flags do EWKB
+-- MAGIC     (Z, M e SRID embutido). Os arquivos do GeoSampa variam por ano: há anos em POINT e anos em POINT Z.
+-- MAGIC     X e Y são sempre as duas primeiras coordenadas; Z e M são ignorados.
+-- MAGIC     """
 -- MAGIC     if wkb is None or srs_id != 31983:
 -- MAGIC         return None
 -- MAGIC     dados = bytes(wkb)
@@ -61,9 +66,10 @@
 -- MAGIC         return None
 -- MAGIC     ordem = "<" if dados[0] == 1 else ">"
 -- MAGIC     (tipo,) = struct.unpack(ordem + "I", dados[1:5])
--- MAGIC     if tipo != 1:  # só POINT 2D
+-- MAGIC     inicio = 9 if tipo & 0x20000000 else 5  # EWKB com SRID: 4 bytes antes das coordenadas
+-- MAGIC     if (tipo & 0x0FFFFFFF) % 1000 != 1 or len(dados) < inicio + 16:  # não é POINT
 -- MAGIC         return None
--- MAGIC     x, y = struct.unpack(ordem + "dd", dados[5:21])
+-- MAGIC     x, y = struct.unpack(ordem + "dd", dados[inicio:inicio + 16])
 -- MAGIC     if math.isnan(x) or math.isnan(y):  # POINT EMPTY
 -- MAGIC         return None
 -- MAGIC     lat, lon = utm23s_para_latlon(x, y)
