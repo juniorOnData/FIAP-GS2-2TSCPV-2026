@@ -63,6 +63,7 @@ jobs/                                             # definição dos jobs do Data
 └── chuvasegura_sibh.job.yml
 src/
 ├── common/
+│   ├── data_quality.py                           # regras e execução das etapas de qualidade de dados
 │   └── ingestion_log.py                          # log de ingestão padrão (módulo Python)
 ├── shared/
 │   └── transformations/gold/
@@ -85,6 +86,9 @@ src/
     ├── ingestion/
     │   ├── 01_geosampa_subprefecture_area_bronze.sql
     │   └── 01_geosampa_history_flooding_events_bronze.py
+    ├── quality/
+    │   ├── 02_geosampa_silver_quality.py
+    │   └── 04_geosampa_gold_quality.py
     └── transformations/
         ├── silver/
         │   └── 02_geosampa_flooding_events_silver.sql
@@ -99,7 +103,7 @@ Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` co
 ## Pré-requisitos
 
 1. **Workspace Databricks com Unity Catalog** e compute serverless ou um Databricks Runtime recente. O notebook da Gold do GeoSampa usa variáveis de sessão SQL e scripting SQL (`BEGIN … END`).
-2. **Repositório clonado como Git folder** (*Workspace → Create → Git folder*). Os notebooks importam `src/common/ingestion_log.py` a partir da pasta do próprio notebook.
+2. **Repositório clonado como Git folder** (*Workspace → Create → Git folder*). Os notebooks importam os módulos de `src/common/` (log de ingestão e qualidade de dados) a partir da pasta do próprio notebook.
 3. **Catálogo e schemas:**
 
    ```sql
@@ -171,9 +175,11 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 | 1 | `01_geosampa_subprefecture_area_bronze` | — |
 | 1 | `01_geosampa_history_flooding_events_bronze` | arquivos no volume |
 | 2 | `02_geosampa_flooding_events_silver` | os dois passos 1 |
+| 2 | `02_geosampa_silver_quality` (pasta `quality/`) | Silver |
 | 3 | `03_dim_geosampa_subprefecture_area` | subprefeituras (Bronze) |
-| 3 | `03_dim_geosampa_type_flooding_events` | Silver |
-| 4 | `04_fact_geosampa_flooding_events` | Silver, as duas dimensões e a `dim_tempo` |
+| 3 | `03_dim_geosampa_type_flooding_events` | qualidade da Silver |
+| 4 | `04_fact_geosampa_flooding_events` | qualidade da Silver, as duas dimensões e a `dim_tempo` |
+| 4 | `04_geosampa_gold_quality` (pasta `quality/`) | fato |
 
 - Arquivos que já foram carregados (mesmo SHA256) são pulados.
 - Um arquivo por ano no volume. Para corrigir um ano, troque o arquivo no volume pela versão nova e rode o job: a carga grava a versão nova e remove as linhas da anterior. Se houver dois arquivos do mesmo ano, a carga para e pede para deixar só um.
@@ -204,11 +210,13 @@ flowchart LR
     G1[01_geosampa_history_flooding_events_bronze] --> G3[02_geosampa_flooding_events_silver]
     G2[01_geosampa_subprefecture_area_bronze] --> G3
     G2 --> G4[03_dim_geosampa_subprefecture_area]
-    G3 --> G5[03_dim_geosampa_type_flooding_events]
-    G3 --> G6[04_fact_geosampa_flooding_events]
+    G3 --> Q1{{02_geosampa_silver_quality}}
+    Q1 --> G5[03_dim_geosampa_type_flooding_events]
+    Q1 --> G6[04_fact_geosampa_flooding_events]
     G4 --> G6
     G5 --> G6
     T0[00_dim_tempo] --> G6
+    G6 --> Q2{{04_geosampa_gold_quality}}
   end
 ```
 
@@ -263,6 +271,34 @@ ORDER BY finalizado_em DESC
 LIMIT 50;
 ```
 
+## Qualidade de dados
+
+As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como tarefas do job, depois da Silver e depois da Gold. O GeoSampa é a referência: as outras fontes vão seguir o mesmo padrão.
+
+- **Regra:** uma consulta SQL que devolve `falhas` (linhas que violam a regra) e `total` (linhas avaliadas). A regra passa quando `falhas / total` não passa do `limite`. Com limite 0, nenhuma falha é aceita.
+- **Severidade:**
+  - `ERRO`: se falhar, a tarefa para e o job não segue. A Gold nunca é carregada a partir de uma Silver reprovada.
+  - `AVISO`: só registra.
+- **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
+- **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
+- **Resultados:** ficam em `fiap_analytics.bronze.geosampa_data_quality_log`, uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+
+Regras do GeoSampa:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | tabela não vazia; mesmas linhas da Bronze; ano e `nr_id_ocorrencia` preenchidos e únicos por ano; data preenchida e entre 2010 e hoje; SRID 31983; ponto dentro da área de São Paulo | `name` repetido no ano; data fora do ano do arquivo; mais de 1% sem coordenada ou sem subprefeitura; mais de 5% do tipo "Outros" |
+| Gold | fato não vazia; mesmas linhas da Silver por ano; ocorrência única; chaves existentes na `dim_tempo` e nas dimensões; ponto dentro da área; chaves únicas e membro `-1` nas dimensões; `dim_tempo` sem chave repetida nem dia faltando | mais de 1% das ocorrências com subprefeitura `-1`; ocorrências com tipo `-1` |
+
+Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
+
+```sql
+SELECT executado_em, etapa, tabela, regra, severidade, status, falhas, total, percentual
+FROM fiap_analytics.bronze.geosampa_data_quality_log
+WHERE status = 'FALHA'
+ORDER BY executado_em DESC;
+```
+
 ## Tabelas geradas
 
 | Camada | Tabela | Conteúdo |
@@ -273,6 +309,7 @@ LIMIT 50;
 | bronze | `sibh_measurements` | Medições de chuva e nível do SIBH na capital, uma fatia por mês |
 | bronze | `geosampa_history_flooding_events` | Ocorrências do GeoSampa, com a geometria em WKB |
 | bronze | `geosampa_subprefecture_area` | Subprefeituras e agrupamentos (Anexo IX) |
+| bronze | `geosampa_data_quality_log` | Resultados das regras de qualidade do GeoSampa |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras, com o membro `-1` (não informado) |
@@ -281,7 +318,7 @@ LIMIT 50;
 
 ## Desenvolvimento
 
-- **Módulo de log:** depois de alterar `src/common/ingestion_log.py`, reinicie o Python do notebook (*Run → Restart Python*) para recarregar o módulo.
+- **Módulos de `src/common`:** depois de alterar `ingestion_log.py` ou `data_quality.py`, reinicie o Python do notebook (*Run → Restart Python*) para recarregar o módulo.
 - **Fluxo de trabalho:** cada mudança vai numa branch própria e entra na `main` por pull request.
 
 ## Próximos passos
