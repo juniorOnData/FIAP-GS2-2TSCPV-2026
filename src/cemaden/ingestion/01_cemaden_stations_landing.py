@@ -1,144 +1,24 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # CEM_LND_001 01_cemaden_stations_landing
+# MAGIC # 01_cemaden_stations_landing
 # MAGIC
-# MAGIC ## 01. Identificação
+# MAGIC Baixa o cadastro de estações do CEMADEN no município (API PED `/pcds-cadastro/dados-cadastrais`) e grava no volume `fiap_analytics.bronze.cemaden_stations`.
 # MAGIC
-# MAGIC | Campo | Valor |
-# MAGIC |---|---|
-# MAGIC | Identificador | CEM_LND_001 |
-# MAGIC | Nome | 01_cemaden_stations_landing |
-# MAGIC | Projeto | ChuvaSegura |
-# MAGIC | Domínio de negócio | Pluviometria (CEMADEN) |
-# MAGIC | Camada | Landing |
-# MAGIC | Linguagem | Python |
-# MAGIC | Responsável técnico | juniorOnData |
-# MAGIC | Responsável funcional | A definir |
-# MAGIC | Status | Homologação |
-# MAGIC | Versão | 1.3 |
-# MAGIC | Criticidade | Média |
-# MAGIC | Caminho no repositório | `src/cemaden/ingestion/01_cemaden_stations_landing.py` |
+# MAGIC Regras:
 # MAGIC
-# MAGIC ## 02. Objetivo
-# MAGIC
-# MAGIC Baixar o cadastro de estações do CEMADEN do município pela API PED e gravar um arquivo por coleta diária no volume, com manifesto de controle.
-# MAGIC
-# MAGIC ## 03. Contexto funcional
-# MAGIC
-# MAGIC O cadastro identifica e localiza as estações pluviométricas. É necessário para posicionar as leituras de chuva e cruzá-las com as ocorrências.
-# MAGIC
-# MAGIC ## 04. Arquitetura e fluxo
-# MAGIC
-# MAGIC | Posição | Item |
-# MAGIC |---|---|
-# MAGIC | Etapa anterior | Nenhuma |
-# MAGIC | Etapa atual | Grava `data_coleta=AAAA-MM-DD/` no volume `cemaden_stations` |
-# MAGIC | Etapa posterior | `02_cemaden_stations_bronze` |
-# MAGIC
-# MAGIC ## 05. Dependências
-# MAGIC
-# MAGIC | Tipo | Item | Uso |
-# MAGIC |---|---|---|
-# MAGIC | Conexão | SGAA `https://sgaa.cemaden.gov.br/SGAA/rest/controle-token/tokens` e PED `https://sws.cemaden.gov.br/PED/rest` | Token e cadastro de estações |
-# MAGIC | Secret | Scope `cemaden`, chaves `ped_email` e `ped_password` | Credenciais da conta PED |
-# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no `cemaden_ingestion_log` |
-# MAGIC | Biblioteca | `requests` | Chamadas HTTP |
-# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE VOLUME, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume de landing; acesso de saída à internet no compute | Criar o volume, gravar arquivos e o log |
-# MAGIC
-# MAGIC ## 06. Parâmetros de entrada
-# MAGIC
-# MAGIC | Nome | Tipo | Obrigatório | Descrição | Valor padrão | Exemplo |
-# MAGIC |---|---|---|---|---|---|
-# MAGIC | `codibge` | text (texto) | Sim | Código IBGE do município | 3550308 | 3550308 |
-# MAGIC | `tipoestacao` | text (texto) | Não | Tipo de estação; vazio traz todos | (vazio) | (vazio) |
-# MAGIC | `formato` | text (texto) | Não | Parâmetro `formato` da API; vazio não envia | JSON | JSON |
-# MAGIC
-# MAGIC ## 07. Fontes de dados
-# MAGIC
-# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
-# MAGIC |---|---|---|---|---|---|---|
-# MAGIC | PED `/pcds-cadastro/dados-cadastrais` | JSON | CEMADEN | Completa (snapshot) | Diária | `codestacao` | `codibge` e, se informado, `tipoestacao` |
-# MAGIC
-# MAGIC ## 08. Processamento técnico
-# MAGIC
-# MAGIC | Etapa | Linguagem | Célula | Descrição |
-# MAGIC |---|---|---|---|
-# MAGIC | E01 | PY | Parâmetros | Widgets `codibge`, `tipoestacao` e `formato`. |
-# MAGIC | E02 | PY | Configuração | Imports, constantes da API e do volume, `BATCH_ID` e criação do volume `cemaden_stations`. |
-# MAGIC | E03 | PY | Log de ingestão | Importa o `IngestionLog` e define `registrar` (etapa `landing`). |
-# MAGIC | E04 | PY | Token e chamadas à PED | Token da SGAA com validade mínima de 15 minutos, intervalo mínimo de 5,5 s entre chamadas, retentativa com espera crescente para 429, 5xx e erro de rede, leitura da resposta. |
-# MAGIC | E05 | PY | Coleta e validação | Coleta com paginação e validação: cadastro não vazio, `codestacao` presente, duplicados e estações fora do município. |
-# MAGIC | E06 | PY | Gravação | Arquivo gzip em `data_coleta=AAAA-MM-DD/`, manifesto gravado por último e registro `SUCESSO` ou `FALHA`. |
-# MAGIC | E07 | PY | Valor para o job | Publica `snapshot_date` em `taskValues` para a tarefa seguinte. |
-# MAGIC
-# MAGIC ## 09. Regras de negócio
-# MAGIC
-# MAGIC | ID | Regra | Lógica | Comportamento esperado |
-# MAGIC |---|---|---|---|
-# MAGIC | RN_CEM_005 | Cadastro como snapshot diário | Uma coleta por dia em `data_coleta=AAAA-MM-DD`; rodar de novo no mesmo dia sobrescreve o arquivo do dia. | Histórico diário de estações ativas e inativas. |
-# MAGIC | RN_CEM_006 | Estação fora do município | Código da estação que não começa com o código IBGE é contado e informado, sem ser filtrado. | Aviso na saída e na mensagem do log; o tratamento fica para a Silver. |
-# MAGIC
-# MAGIC ## 10. Saídas de dados
-# MAGIC
-# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
-# MAGIC |---|---|---|---|---|
-# MAGIC | Volume `cemaden_stations`: `data_coleta=AAAA-MM-DD/stations_<codibge>_<AAAAMMDD>.json.gz` e `.manifest.json` | JSON por linha (gzip) e manifesto JSON | Um arquivo por coleta diária | `codestacao` (dentro do arquivo) | Sobrescreve o arquivo do dia |
-# MAGIC
-# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
-# MAGIC
-# MAGIC ## 11. Qualidade dos dados
-# MAGIC
-# MAGIC Validações na coleta: cadastro não vazio, todos os registros são objetos JSON com `codestacao`. Duplicidade de `codestacao` e estações fora do município são contadas, informadas e registradas na mensagem do log.
-# MAGIC
-# MAGIC ## 12. Tratamento de erros
-# MAGIC
-# MAGIC | Situação | Comportamento | Registro | Recuperação |
-# MAGIC |---|---|---|---|
-# MAGIC | Token recusado (401 ou 403) | Renova o token e reinicia a coleta uma vez | Saída do notebook | Automática; se persistir, conferir as credenciais no secret scope |
-# MAGIC | 429, 5xx ou erro de rede | Até 5 tentativas com espera crescente | Saída do notebook | Automática |
-# MAGIC | Resposta vazia ou sem `codestacao` | Para a execução | `FALHA` no `fiap_analytics.bronze.cemaden_ingestion_log` | Conferir os parâmetros e rodar de novo |
-# MAGIC
-# MAGIC ## 13. Segurança e governança
-# MAGIC
-# MAGIC | Item | Valor |
-# MAGIC |---|---|
-# MAGIC | Classificação dos dados | Pública (dados da rede observacional do CEMADEN/MCTI; confirmar os termos de uso da PED) |
-# MAGIC | Dados sensíveis | Nenhum nos dados. As credenciais da conta PED são sensíveis |
-# MAGIC | Credenciais | Secret scope `cemaden`, chaves `ped_email` e `ped_password` |
-# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE VOLUME, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume de landing; acesso de saída à internet no compute |
-# MAGIC | Políticas aplicáveis | Termos de uso da API PED do CEMADEN (confirmar); credenciais nunca impressas nem gravadas |
-# MAGIC
-# MAGIC ## 14. Monitoramento e operação
-# MAGIC
-# MAGIC | Item | Valor |
-# MAGIC |---|---|
-# MAGIC | Job e tarefa | `ChuvaSegura - CEMADEN` (`jobs/chuvasegura_cemaden.job.yml`), tarefa `cemaden_stations_landing` |
-# MAGIC | Frequência | Diária, 07:00 (America/Sao_Paulo); agenda pausada até o backfill |
-# MAGIC | SLA | A definir |
-# MAGIC | Métricas | Estações coletadas, duplicadas e fora do município |
-# MAGIC | Logs | `fiap_analytics.bronze.cemaden_ingestion_log` (etapa `landing`, janela = data da coleta) |
-# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
-# MAGIC | Reprocessamento | Rodar de novo no mesmo dia (sobrescreve a coleta do dia) |
-# MAGIC
-# MAGIC ## 15. Histórico de alterações
-# MAGIC
-# MAGIC | Versão | Data | Responsável | Descrição |
-# MAGIC |---|---|---|---|
-# MAGIC | 1.0 | 2026-11-16 | juniorOnData | Criação do notebook (commit `2a2af58`, sem PR) |
-# MAGIC | 1.1 | 2026-11-16 | juniorOnData | Log de ingestão próprio da origem, no formato padrão (PR #8) |
-# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Formato de código fonte, módulo de log compartilhado e novo nome do arquivo (PR #9) |
-# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
+# MAGIC 1. Token da SGAA com as credenciais do secret scope `cemaden` (`ped_email` e `ped_password`).
+# MAGIC 2. Uma coleta por dia em `data_coleta=AAAA-MM-DD/`, em JSON por linha comprimido (gzip). Rodar de novo no mesmo dia sobrescreve o arquivo do dia.
+# MAGIC 3. Manifesto gravado por último (contagem, SHA256, campos), usado na conferência da Bronze.
+# MAGIC 4. Uma linha no `cemaden_ingestion_log` (etapa `landing`).
 
 # COMMAND ----------
 
-# [PY] E01 Parâmetros
 dbutils.widgets.text("codibge", "3550308", "Código IBGE do município")
 dbutils.widgets.text("tipoestacao", "", "Tipo de estação (vazio = todos)")
 dbutils.widgets.text("formato", "JSON", "Parâmetro formato (vazio = não enviar)")
 
 # COMMAND ----------
 
-# [PY] E02 Configuração
 import base64
 import gzip
 import hashlib
@@ -192,7 +72,6 @@ print(f"batch_id={BATCH_ID} | codibge={CODIBGE} | tipoestacao={TIPOESTACAO or '(
 
 # COMMAND ----------
 
-# [PY] E03 Log de ingestão
 # Log padrão da origem (src/common/ingestion_log.py). Sobe pelas pastas até achar src/ para importar o módulo.
 _src = os.getcwd()
 while not os.path.isdir(os.path.join(_src, "common")) and os.path.dirname(_src) != _src:
@@ -215,7 +94,6 @@ registrar = IngestionLog(spark, LOG_TABLE, FONTE, ETAPA, BATCH_ID).registrar
 
 # COMMAND ----------
 
-# [PY] E04 Token e chamadas à PED
 class AuthError(Exception):
     """PED respondeu 401 ou 403."""
 
@@ -335,7 +213,6 @@ def parse_body(resp: requests.Response):
 
 # COMMAND ----------
 
-# [PY] E05 Coleta e validação
 def collect():
     params = {"codibge": CODIBGE}
     if TIPOESTACAO:
@@ -390,7 +267,6 @@ def validate(records: list) -> dict:
 
 # COMMAND ----------
 
-# [PY] E06 Gravação
 try:
     records, api_calls, params = collect()
     stats = validate(records)
@@ -452,7 +328,6 @@ except Exception as exc:
 
 # COMMAND ----------
 
-# [PY] E07 Valor para o job
 # Repassa a data da coleta para a tarefa da Bronze quando rodar dentro de um Job.
 try:
     dbutils.jobs.taskValues.set(key="snapshot_date", value=snapshot_date)

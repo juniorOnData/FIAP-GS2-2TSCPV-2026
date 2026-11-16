@@ -1,145 +1,30 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # SIB_LND_002 03_sibh_measurements_landing
+# MAGIC # 03_sibh_measurements_landing
 # MAGIC
-# MAGIC ## 01. Identificação
+# MAGIC Baixa as medições de chuva e nível do SIBH (SP Águas) para os sensores da capital e grava no volume `fiap_analytics.bronze.sibh_measurements`.
 # MAGIC
-# MAGIC | Campo | Valor |
-# MAGIC |---|---|
-# MAGIC | Identificador | SIB_LND_002 |
-# MAGIC | Nome | 03_sibh_measurements_landing |
-# MAGIC | Projeto | ChuvaSegura |
-# MAGIC | Domínio de negócio | Hidrologia (SIBH) |
-# MAGIC | Camada | Landing |
-# MAGIC | Linguagem | Python |
-# MAGIC | Responsável técnico | juniorOnData |
-# MAGIC | Responsável funcional | A definir |
-# MAGIC | Status | Homologação |
-# MAGIC | Versão | 1.3 |
-# MAGIC | Criticidade | Média |
-# MAGIC | Caminho no repositório | `src/sibh/ingestion/03_sibh_measurements_landing.py` |
+# MAGIC Fonte: `GET https://cth.daee.sp.gov.br/sibh/api/v2/measurements` (pública, sem autenticação).
 # MAGIC
-# MAGIC ## 02. Objetivo
+# MAGIC Parâmetros usados: `station_prefix_ids[]` (até 10 ids de sensor por chamada), `start_date` e `end_date` em UTC no formato `AAAA-MM-DDTHH:mm`, `group_type`, `serializer=default`, `format=json`.
 # MAGIC
-# MAGIC Baixar as medições de chuva e nível dos sensores da capital (exceto CEMADEN) pela API do SIBH e gravar um arquivo por mês no volume, com manifesto que serve de checkpoint.
+# MAGIC Modos (widget `mode`):
 # MAGIC
-# MAGIC ## 03. Contexto funcional
+# MAGIC 1. `probe`: faz 2 chamadas de teste e devolve a resposta real na mensagem de saída, sem gravar nada (validado em 11/11/2026).
+# MAGIC 2. `backfill` (padrão): descobre o período de cada sensor com `group_type=all` e baixa os meses fechados a partir de `min_month` (padrão 2020-01), pulando os que já estão completos. Para um teste rápido, use `min_month = 2026-10`.
+# MAGIC 3. `incremental`: rebaixa, dos sensores ativos, o mês atual, o mês anterior enquanto ele não estiver completo e qualquer mês que tenha sido baixado antes de fechar e ainda não foi completado.
 # MAGIC
-# MAGIC Complementa a chuva do CEMADEN com outras redes e traz o nível de rios e córregos, essencial para explicar inundações.
+# MAGIC Regras (mesmo padrão das leituras do CEMADEN):
 # MAGIC
-# MAGIC ## 04. Arquitetura e fluxo
-# MAGIC
-# MAGIC | Posição | Item |
-# MAGIC |---|---|
-# MAGIC | Etapa anterior | `02_sibh_stations_bronze` (cadastro na Bronze) |
-# MAGIC | Etapa atual | Grava `ano=AAAA/mes=MM/` no volume `sibh_measurements` |
-# MAGIC | Etapa posterior | `04_sibh_measurements_bronze` |
-# MAGIC
-# MAGIC ## 05. Dependências
-# MAGIC
-# MAGIC | Tipo | Item | Uso |
-# MAGIC |---|---|---|
-# MAGIC | Conexão | `https://cth.daee.sp.gov.br/sibh/api/v2/measurements` | Medições |
-# MAGIC | Tabela | `fiap_analytics.bronze.sibh_stations` | Sensores da capital |
-# MAGIC | Módulo | `src/common/ingestion_log.py` | Registro no log |
-# MAGIC | Biblioteca | `requests` | Chamadas HTTP |
-# MAGIC | Permissão | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE VOLUME, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume de landing; acesso de saída à internet no compute; SELECT em `fiap_analytics.bronze.sibh_stations` | Ler o cadastro, gravar arquivos e o log |
-# MAGIC
-# MAGIC ## 06. Parâmetros de entrada
-# MAGIC
-# MAGIC | Nome | Tipo | Obrigatório | Descrição | Valor padrão | Exemplo |
-# MAGIC |---|---|---|---|---|---|
-# MAGIC | `mode` | dropdown (texto) | Sim | `probe` testa a API sem gravar; `backfill` baixa os meses fechados; `incremental` baixa o mês atual e os pendentes | backfill | incremental |
-# MAGIC | `group_type` | text (texto) | Não | Agrupamento da API; `minute` é a leitura original | minute | minute |
-# MAGIC | `min_month` | text (AAAA-MM) | Sim | Primeiro mês da ingestão | 2020-01 | 2026-10 |
-# MAGIC | `excluded_owners` | text (lista) | Não | Instituições excluídas, separadas por vírgula | CEMADEN | CEMADEN |
-# MAGIC | `min_interval_s` | text (número) | Não | Intervalo mínimo entre chamadas, em segundos | 1.0 | 1.0 |
-# MAGIC | `force` | dropdown (false/true) | Não | No backfill, baixa de novo meses já completos | false | true |
-# MAGIC
-# MAGIC ## 07. Fontes de dados
-# MAGIC
-# MAGIC | Fonte | Formato | Origem | Tipo de leitura | Frequência | Chave | Filtros |
-# MAGIC |---|---|---|---|---|---|---|
-# MAGIC | SIBH `api/v2/measurements` | JSON | SIBH, SP Águas | Por janela mensal, em lotes de até 10 sensores | Diária no incremental | `station_prefix_id` + `date` | Sensores da capital, tipos 1 e 2, fora os donos excluídos |
-# MAGIC | `fiap_analytics.bronze.sibh_stations` | Delta | Bronze do SIBH | Snapshot mais recente | A cada execução | `id` | `cod_ibge = 3550308`, `station_type_id` 1 ou 2 |
-# MAGIC
-# MAGIC ## 08. Processamento técnico
-# MAGIC
-# MAGIC | Etapa | Linguagem | Célula | Descrição |
-# MAGIC |---|---|---|---|
-# MAGIC | E01 | PY | Parâmetros | Widgets `mode`, `group_type`, `min_month`, `excluded_owners`, `min_interval_s` e `force`. |
-# MAGIC | E02 | PY | Configuração | Imports, constantes, carência de 3 dias, validação de `min_month`, `BATCH_ID` e criação do volume (exceto no `probe`). |
-# MAGIC | E03 | PY | Log de ingestão | Importa o `IngestionLog` e define `registrar` (etapa `landing`). |
-# MAGIC | E04 | PY | Chamada à API | Limitador de chamadas, `get_measurements` (até 10 sensores por chamada, com retentativa) e divisão em lotes. |
-# MAGIC | E05 | PY | Modo probe | Duas chamadas de teste; devolve a resposta na saída do notebook, sem gravar nada. |
-# MAGIC | E06 | PY | Sensores e funções de mês | Sensores da capital no cadastro mais recente; funções de data, caminho, manifesto, mês completo e meses incompletos. |
-# MAGIC | E07 | PY | Planejamento dos meses | Backfill (período de cada sensor com `group_type = all`) ou incremental (mês atual, anterior incompleto e meses incompletos). |
-# MAGIC | E08 | PY | Download de um mês | Um arquivo gzip com todos os lotes do mês e manifesto gravado por último. |
-# MAGIC | E09 | PY | Execução | Baixa os meses planejados (no backfill, pula os completos), registra `SUCESSO`, `PARCIAL`, `SEM_DADOS` ou `FALHA` e termina com erro se algum mês falhou. |
-# MAGIC
-# MAGIC ## 09. Regras de negócio
-# MAGIC
-# MAGIC | ID | Regra | Lógica | Comportamento esperado |
-# MAGIC |---|---|---|---|
-# MAGIC | RN_SIB_001 | Sensores monitorados | Cadastro mais recente, município 3550308, tipos 1 (nível) e 2 (chuva), fora as instituições de `excluded_owners` (CEMADEN, já coletado pela PED). | Sem sobreposição com a rede CEMADEN. |
-# MAGIC | RN_SIB_002 | Mês completo | Um mês é completo se foi baixado pelo menos 3 dias depois de terminar (`CLOSING_GRACE`). | Antes disso fica `PARCIAL` e volta a ser baixado. |
-# MAGIC | RN_SIB_003 | Meses e sensores do incremental | Mês atual, mês anterior incompleto e meses com manifesto incompleto; sensores em operação ou com medição no mês. | Nenhum mês fica incompleto para sempre. |
-# MAGIC | RN_SIB_004 | Período do backfill | Meses fechados a partir de `min_month`, dentro do período de dados de cada sensor. | Não pede meses sem dados do sensor. |
-# MAGIC
-# MAGIC ## 10. Saídas de dados
-# MAGIC
-# MAGIC | Destino | Formato | Granularidade | Chave | Modo de escrita |
-# MAGIC |---|---|---|---|---|
-# MAGIC | Volume `sibh_measurements`: `ano=AAAA/mes=MM/measurements_AAAAMM.json.gz` e `.manifest.json` | JSON por linha (gzip) e manifesto JSON | Um arquivo por mês | `station_prefix_id` + `date` | Sobrescreve o arquivo do mês |
-# MAGIC | Volume `sibh_measurements`: `_coverage/coverage_AAAAMMDD.json` | JSON | Um arquivo por backfill | `station_prefix_id` | Sobrescreve o arquivo do dia |
-# MAGIC
-# MAGIC As colunas de cada tabela estão no dicionário de dados (`docs/02_catalogos/dicionario_de_dados.csv`).
-# MAGIC
-# MAGIC ## 11. Qualidade dos dados
-# MAGIC
-# MAGIC O manifesto registra sensores pedidos e com dados, contagem e SHA256 de cada mês. A conferência de linhas é feita na Bronze.
-# MAGIC
-# MAGIC ## 12. Tratamento de erros
-# MAGIC
-# MAGIC | Situação | Comportamento | Registro | Recuperação |
-# MAGIC |---|---|---|---|
-# MAGIC | 429, 5xx ou erro de rede | Até 5 tentativas com espera crescente | Saída do notebook | Automática |
-# MAGIC | Falha em um mês | O mês fica sem manifesto e o backfill continua | `FALHA` no `fiap_analytics.bronze.sibh_ingestion_log` | Rodar de novo: o mês é refeito |
-# MAGIC
-# MAGIC ## 13. Segurança e governança
-# MAGIC
-# MAGIC | Item | Valor |
-# MAGIC |---|---|
-# MAGIC | Classificação dos dados | Pública (API pública do SIBH, SP Águas; confirmar os termos de uso) |
-# MAGIC | Dados sensíveis | Nenhum |
-# MAGIC | Credenciais | Nenhuma (API pública, sem autenticação) |
-# MAGIC | Permissões necessárias | USE CATALOG em `fiap_analytics`; USE SCHEMA, CREATE VOLUME, CREATE TABLE e MODIFY em `fiap_analytics.bronze`; READ VOLUME e WRITE VOLUME no volume de landing; acesso de saída à internet no compute; SELECT em `fiap_analytics.bronze.sibh_stations` |
-# MAGIC | Políticas aplicáveis | Termos de uso dos dados do SIBH (confirmar) |
-# MAGIC
-# MAGIC ## 14. Monitoramento e operação
-# MAGIC
-# MAGIC | Item | Valor |
-# MAGIC |---|---|
-# MAGIC | Job e tarefa | `ChuvaSegura - SIBH` (`jobs/chuvasegura_sibh.job.yml`), tarefa `sibh_measurements_landing` |
-# MAGIC | Frequência | Diária, 07:30 (America/Sao_Paulo); agenda pausada até o backfill |
-# MAGIC | SLA | A definir |
-# MAGIC | Métricas | Meses por status, registros, chamadas e tempo por mês |
-# MAGIC | Logs | `fiap_analytics.bronze.sibh_ingestion_log` (etapa `landing`, janela = AAAA-MM) |
-# MAGIC | Alertas | Não configurado (recomendação: notificação de falha no job) |
-# MAGIC | Reprocessamento | Backfill com `force = true` e `min_month` no mês desejado |
-# MAGIC
-# MAGIC ## 15. Histórico de alterações
-# MAGIC
-# MAGIC | Versão | Data | Responsável | Descrição |
-# MAGIC |---|---|---|---|
-# MAGIC | 1.0 | 2026-11-16 | juniorOnData | Criação do notebook (commit `2a2af58`, sem PR) |
-# MAGIC | 1.1 | 2026-11-16 | juniorOnData | Log de ingestão próprio da origem e meses parciais (PR #8) |
-# MAGIC | 1.2 | 2026-11-16 | juniorOnData | Formato de código fonte, módulo de log compartilhado e novo nome `03_sibh_measurements_landing` (PR #9) |
-# MAGIC | 1.3 | 2026-11-16 | juniorOnData | Documentação no padrão oficial (PR #15) |
+# MAGIC 1. Sensores: cadastro mais recente da `fiap_analytics.bronze.sibh_stations`, capital (`cod_ibge = 3550308`), chuva e nível (`station_type_id` 1 e 2), sem CEMADEN (já ingerido pela PED).
+# MAGIC 2. Janelas mensais em UTC. Um arquivo por mês com todos os lotes de 10 sensores, em JSON por linha comprimido (gzip), registros exatamente como a API devolve.
+# MAGIC 3. Idempotência por mês: o arquivo do mês é sobrescrito. O manifesto é gravado por último e serve de checkpoint.
+# MAGIC 4. Mês completo: só quando foi baixado pelo menos `CLOSING_GRACE` (3 dias) depois de terminar, para pegar leituras que chegam atrasadas. Antes disso o mês entra como `PARCIAL` no log e volta a ser baixado pelo incremental ou pelo backfill.
+# MAGIC 5. Retry com backoff para 429, 5xx e erros de rede. Intervalo mínimo entre chamadas configurável.
+# MAGIC 6. Falha em um mês não interrompe o backfill: o mês fica sem manifesto, entra como `FALHA` no log e é refeito na próxima execução.
 
 # COMMAND ----------
 
-# [PY] E01 Parâmetros
 dbutils.widgets.dropdown("mode", "backfill", ["probe", "backfill", "incremental"], "Modo")
 dbutils.widgets.text("group_type", "minute", "group_type (minute = leitura original)")
 dbutils.widgets.text("min_month", "2020-01", "Primeiro mês da ingestão (AAAA-MM). Nada antes disso é baixado")
@@ -149,7 +34,6 @@ dbutils.widgets.dropdown("force", "false", ["false", "true"], "Rebaixar meses qu
 
 # COMMAND ----------
 
-# [PY] E02 Configuração
 import gzip
 import hashlib
 import json
@@ -205,7 +89,6 @@ print(f"batch_id={BATCH_ID} | mode={MODE} | group_type={GROUP_TYPE} | a partir d
 
 # COMMAND ----------
 
-# [PY] E03 Log de ingestão
 # Log padrão da origem (src/common/ingestion_log.py). Sobe pelas pastas até achar src/ para importar o módulo.
 _src = os.getcwd()
 while not os.path.isdir(os.path.join(_src, "common")) and os.path.dirname(_src) != _src:
@@ -228,7 +111,6 @@ registrar = IngestionLog(spark, LOG_TABLE, FONTE, ETAPA, BATCH_ID).registrar
 
 # COMMAND ----------
 
-# [PY] E04 Chamada à API
 _last_call_start = [0.0]
 API_CALLS = [0]
 
@@ -291,7 +173,6 @@ def batches(items: list, size: int = BATCH_SIZE):
 
 # COMMAND ----------
 
-# [PY] E05 Modo probe
 if MODE == "probe":
     test_ids = ["35416", "35417", "33665", "33664", "174", "29077"]  # Cocaia chuva/nível, Jd. Brasília chuva/nível, Mirante de Santana, E3-007
     probe = {}
@@ -328,7 +209,6 @@ if MODE == "probe":
 
 # COMMAND ----------
 
-# [PY] E06 Sensores e funções de mês
 latest_snapshot = spark.table(STATIONS_TABLE).agg(F.max("_snapshot_date")).first()[0]
 sensors_df = (
     spark.table(STATIONS_TABLE)
@@ -411,7 +291,6 @@ def incomplete_months() -> list:
 
 # COMMAND ----------
 
-# [PY] E07 Planejamento dos meses
 current_month = month_start(NOW.year, NOW.month)
 
 if MODE == "backfill":
@@ -486,7 +365,6 @@ print(f"Chamadas estimadas: {sum((len(v) + BATCH_SIZE - 1) // BATCH_SIZE for v i
 
 # COMMAND ----------
 
-# [PY] E08 Download de um mês
 def download_month(key: str, sensor_ids: list) -> dict:
     y, m = map(int, key.split("-"))
     start = month_start(y, m)
@@ -536,7 +414,6 @@ def download_month(key: str, sensor_ids: list) -> dict:
 
 # COMMAND ----------
 
-# [PY] E09 Execução
 failed, done_secs = [], []
 run_started = datetime.now(timezone.utc)
 for key in months:
