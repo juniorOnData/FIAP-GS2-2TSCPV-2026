@@ -254,7 +254,7 @@ O cadastro de estações e as leituras de chuva seguem em paralelo até a Silver
 - A PED aceita 12 chamadas por minuto, então o primeiro backfill desde 2020 leva algumas horas. Se parar no meio, basta rodar de novo: o notebook continua de onde parou.
 - Os cadastros (`*_stations_*`) são snapshots diários: rodar no mesmo dia substitui o snapshot do dia.
 - **Silver das estações:** uma linha por estação, com a versão do snapshot mais recente em que ela aparece. Estações que saíram do cadastro continuam na tabela (`fl_no_cadastro_atual = false`), para que as leituras antigas tenham estação.
-- **Silver das leituras:** `datahora` da fonte está em UTC e vira `dt_hr_leitura_utc`; `dt_leitura`, `nr_hora` e `cod_dim_data` são calculados no fuso de São Paulo. `valor` vira `nr_chuva_mm` (chuva em mm no intervalo da leitura). Leituras duplicadas (mesma estação, sensor e data e hora) ficam uma só, a da carga mais recente.
+- **Silver das leituras:** `datahora` da fonte está em UTC e vira `dt_hr_leitura_utc`; `dt_leitura`, `nr_hora` e `cod_dim_data` são calculados no fuso de São Paulo. `valor` vira `nr_chuva_mm` (chuva em mm no intervalo da leitura). Chuva negativa (falha do sensor) fica com `nr_chuva_mm` nulo e `fl_valor_invalido = true`; o valor recebido continua em `nr_chuva_mm_origem`. Leituras duplicadas (mesma estação, sensor e data e hora) ficam uma só, a da carga mais recente.
 - **Gold:** a fato `fact_cemaden_rainfall_hourly` tem uma linha por estação, sensor, dia e hora (fuso de São Paulo), com a chuva acumulada, a maior leitura e o número de leituras da hora. Hora sem leitura não tem linha. A carga é incremental por mês, com o mesmo controle de assinatura da fato do GeoSampa.
 
 ### SIBH
