@@ -1,5 +1,5 @@
 # Publicação Gold
 
-Esta pasta recebe os artefatos estáticos exportados do Databricks.
+Esta pasta é escrita **automaticamente** pelo job `ChuvaSegura` do Databricks (tarefa `export_web`, `data/src/shared/export/01_export_web.py`), por commit direto neste repositório. A Vercel republica o site a cada commit.
 
-Para a primeira integração, copie para cá `manifest.json`, `ocorrencias.json` e `subprefeituras.json` gerados pela tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_web.py`), no Volume `/Volumes/fiap_analytics/gold/chuvasegura_web/`. Não copie arquivos de `data/demo/` para esta pasta. Após incluir um manifesto válido, altere `DATA_ROOT` em `app/assets/js/config.js` para `data/gold`.
+Não edite nem copie arquivos para cá à mão, e não copie arquivos de `data/demo/`. Enquanto esta pasta não tiver um `manifest.json`, o app usa o pacote de demonstração (com banner).

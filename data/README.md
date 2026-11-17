@@ -18,7 +18,17 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 
 ### Publicação para o site
 
-A última tarefa do job `ChuvaSegura`, `src/shared/export/01_export_web.py`, exporta a Gold para o contrato estático de `../app/DATA_CONTRACT.md` e grava os arquivos no Volume `fiap_analytics.gold.chuvasegura_web`. Cada fonte só é exportada se a qualidade Gold dela passou na mesma execução do job. Para publicar no site, copie os arquivos para `app/data/gold/` e altere `DATA_ROOT` para `data/gold`. Por enquanto o pacote tem ocorrências e subprefeituras do GeoSampa; as demais fontes entram em etapas posteriores.
+A última tarefa do job `ChuvaSegura`, `src/shared/export/01_export_web.py`, exporta a Gold para o contrato estático de `../app/DATA_CONTRACT.md` e **envia o pacote ao GitHub** (`app/data/gold/`), de onde a Vercel republica o site sozinha.
+
+- **Conteúdo:** ocorrências e subprefeituras (GeoSampa); estações, chuva diária e chuva horária (CEMADEN, SIBH e INMET); nível de rios (SIBH). IBGE, OSM e a suscetibilidade do SGB entram em etapas posteriores.
+- **Trava de qualidade:** cada fonte só é exportada se a qualidade Gold dela rodou **na mesma execução do job** e passou.
+- **Tudo ou nada no site:** se alguma fonte pedida falhar, nada vai ao GitHub (o site mantém a versão anterior), o que passou fica no Volume `fiap_analytics.gold.chuvasegura_web` para conferência e a tarefa termina com erro.
+- **Sem commit à toa:** o commit só acontece se os dados mudaram (compara o SHA-256 de cada conjunto com o `manifest.json` publicado). A chuva horária muda toda hora, então na prática há um commit por execução.
+- **Fontes que ainda não rodaram:** o widget `fontes` (padrão `geosampa,cemaden,sibh,inmet`) escolhe o que exportar. Antes do backfill do INMET, tire `inmet`.
+- **Segredo:** scope `github`, chave `token`, com um token do GitHub de permissão *Contents: read and write* **só neste repositório** (fine-grained). Crie com `databricks secrets create-scope github` e `databricks secrets put-secret github token`. O token nunca é gravado em arquivo ou log.
+- **Branch:** o commit vai para a branch de produção da Vercel (widget `github_branch`, padrão `main`). Se ela tiver proteção que exige PR, o commit falha: use uma branch de dados dedicada e aponte a Vercel para ela, ou libere o token na regra.
+- **Unidade do nível:** o widget `unidade_nivel` (padrão `m`) é o rótulo do nível no site. A fato guarda o valor "na unidade da fonte", então confirme a unidade do SIBH antes de confiar no rótulo.
+- **Testes:** `python -m unittest discover -s data/tests` (séries e publicação no GitHub, sem Spark nem rede).
 
 Tudo fica no catálogo `fiap_analytics` do Unity Catalog, em três camadas:
 

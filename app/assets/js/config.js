@@ -1,7 +1,9 @@
-// Configuração da publicação. Trocar DATA_ROOT para "data/gold" quando os
-// exports reais da Gold estiverem publicados (mesmo contrato: app/DATA_CONTRACT.md).
+// Configuração da publicação. O app usa a primeira pasta de DATA_ROOTS que tiver um manifest.json:
+// os exports reais da Gold (data/gold, publicados pelo job do Databricks) e, se ainda não existirem,
+// o pacote sintético de demonstração (sempre sinalizado na interface). Mesmo contrato: app/DATA_CONTRACT.md.
 export const CONFIG = {
-  DATA_ROOT: "data/demo",
+  DATA_ROOTS: ["data/gold", "data/demo"],
+  DATA_ROOT: "data/gold", // definido em loadManifest() com a pasta efetivamente usada
   TIMEZONE: "America/Sao_Paulo",
   TZ_LABEL: "horário de São Paulo (UTC−03:00)",
   // Idade máxima, em horas, antes de um dado ser marcado como desatualizado.

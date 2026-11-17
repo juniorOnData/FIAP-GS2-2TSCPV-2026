@@ -43,8 +43,12 @@ export default {
 
     // ---------------- suscetibilidade × ocorrências
     const sb = resultState(susc, "Suscetibilidade");
-    if (sb) root.querySelector("#a-susc").innerHTML = sb;
-    else {
+    if (sb) {
+      root.querySelector("#a-susc").innerHTML = sb;
+      // sem suscetibilidade, o card de chuva ocupa a linha inteira (não deixa um vazio ao lado)
+      root.querySelector("#a-susc-chart").remove();
+      root.querySelector("#a-rain").className = "span-12";
+    } else {
       const A = susc.meta.area_municipio_km2;
       const u = susc.meta.area_uniao_km2;
       const cnt = groupCount(occ.map((o) => o.grau || 0));

@@ -19,13 +19,13 @@ Depois, abra <http://localhost:8000>.
 
 O pacote de demonstração tem uma data de referência fixa. Depois de algumas horas, as leituras de chuva e nível aparecem como **desatualizadas**: é o comportamento esperado (F10). Regere o pacote para atualizar a referência.
 
-## Publicar a Gold no site
+## Dados reais
 
-1. No Databricks, o job `ChuvaSegura` termina com a tarefa `export_web` (`data/src/shared/export/01_export_web.py`), depois de todas as fontes. Ela publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/chuvasegura_web/`, só com as fontes cuja qualidade Gold passou na mesma execução.
-3. Baixe esses três arquivos para `app/data/gold/` no repositório. A pasta contém dados públicos de ocorrência e ficará pública junto com o site.
-4. Em `assets/js/config.js`, troque `DATA_ROOT` de `data/demo` para `data/gold`, depois publique a alteração.
+O app usa a primeira pasta que tiver um `manifest.json`: `data/gold/` (dados reais) e, se ela ainda não existir, `data/demo/` (sintéticos, com banner permanente). Não é preciso trocar nenhuma configuração.
 
-O pacote inicial inclui só GeoSampa. A aplicação desativa camadas não publicadas e não apresenta o cruzamento com suscetibilidade como se estivesse disponível. Não misture arquivos de `data/demo/` com `data/gold/`.
+`data/gold/` é escrita pelo job `ChuvaSegura` no Databricks: a tarefa `export_web` (`data/src/shared/export/01_export_web.py`) faz o commit direto neste repositório, e a Vercel publica em seguida. **Não edite nem copie arquivos à mão para essa pasta.** Detalhes, segredo do token e travas de qualidade em `data/README.md`.
+
+A aplicação desativa camadas não publicadas (o manifesto lista o motivo) e não apresenta o cruzamento com suscetibilidade como se estivesse disponível. Não misture arquivos de `data/demo/` com `data/gold/`.
 
 ## Publicar na Vercel
 

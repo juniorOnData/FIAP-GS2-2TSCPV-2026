@@ -1,8 +1,9 @@
 # Job principal do ChuvaSegura: orquestra o pipeline inteiro numa execução diária.
 #   1. dim_tempo: a única dimensão compartilhada, criada uma vez antes de todas as fontes.
 #   2. As sete fontes, cada uma no seu job (landing até a Gold, com as travas de qualidade), em paralelo.
-#   3. export_web: publica a Gold no Volume do site. Roda mesmo se alguma fonte falhar (ALL_DONE); o
-#      notebook só exporta as fontes cuja qualidade Gold passou nesta execução.
+#   3. export_web: publica a Gold no Volume e, por commit, no repositório (a Vercel republica o site). Roda mesmo
+#      se alguma fonte falhar (ALL_DONE); o notebook só exporta fontes cuja qualidade Gold passou nesta execução
+#      e só atualiza o site se todas as fontes pedidas passaram.
 # Os jobs das fontes não têm agenda própria: só este job tem agenda.
 # Os job_id são os do workspace; num Databricks Asset Bundle, troque por ${resources.jobs.<chave>.id}.
 resources:
@@ -68,6 +69,11 @@ resources:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/export/01_export_web
             base_parameters:
               inicio_execucao: "{{job.start_time.iso_datetime}}"
+              fontes: "geosampa,cemaden,sibh,inmet"  # tire "inmet" antes do backfill dele
+              github_publicar: "sim"
+              github_repo: juniorOnData/FIAP-GS2-2TSCPV-2026
+              github_branch: main
+              unidade_nivel: m  # confirmar a unidade do nível no SIBH
             source: WORKSPACE
           environment_key: Default
       queue:
