@@ -16,6 +16,10 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 
 ## Arquitetura
 
+### Publicação para o site
+
+O notebook `src/geosampa/export/06_export_geosampa_web.py` exporta a Gold do GeoSampa para o contrato estático de `../app/DATA_CONTRACT.md`. Ele valida a última execução Gold de qualidade e grava três arquivos no Volume `fiap_analytics.gold.geosampa_chuvasegura_web`. Para publicar no site estático, baixe-os para `app/data/gold/` e altere `DATA_ROOT` para `data/gold`. Essa primeira publicação contém ocorrências e o cadastro de subprefeituras; as demais fontes são acrescentadas em etapas posteriores.
+
 Tudo fica no catálogo `fiap_analytics` do Unity Catalog, em três camadas:
 
 ```mermaid
@@ -72,6 +76,7 @@ O número no início de cada arquivo indica a ordem de execução dentro da font
 jobs/                                             # definição dos jobs do Databricks (YAML)
 ├── chuvasegura_cemaden.job.yml
 ├── chuvasegura_geosampa.job.yml
+├── chuvasegura_geosampa_web_export.job.yml
 ├── chuvasegura_ibge.job.yml
 ├── chuvasegura_inmet.job.yml
 ├── chuvasegura_osm.job.yml

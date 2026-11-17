@@ -5,7 +5,7 @@ A aplicação lê só arquivos estáticos em `app/<DATA_ROOT>/`, definido em `as
 | Pasta | Conteúdo |
 |---|---|
 | `data/demo/` | Pacote sintético do modo demonstração, gerado por `scripts/gerar_dados_demo.py`. |
-| `data/gold/` | Exports reais da Gold (ainda não existe). |
+| `data/gold/` | Exports reais da Gold. A primeira publicação pode conter só GeoSampa; o manifesto lista os conjuntos disponíveis. |
 
 As duas pastas nunca se misturam. Para publicar dados reais, gere os mesmos arquivos em `data/gold/` e troque `DATA_ROOT`. A interface mostra o banner de demonstração sempre que `manifest.modo === "demo"`.
 
@@ -53,8 +53,8 @@ Cada arquivo é `{ "meta": {...}, "data": ... }`. Campos de `meta`:
 
 | Arquivo | `data` | Origem na Gold |
 |---|---|---|
-| `subprefeituras.json` | `[{ sigla, nome }]` | `dim_geosampa_subprefecture_area` (`SIG_SUBPREFEITURA_GEOSAMPA`, `NOM_SUBPREFEITURA`) |
-| `ocorrencias.json` | colunar: `{ ano_origem[], id[], data[], tipo[], subprefeitura[], lat[], lon[], grau_susc_inundacao[] }` | `fact_geosampa_flooding_events` + `dim_tempo` + dimensões de tipo e subprefeitura; `grau_susc_inundacao` = maior `NUM_GRAU_SUSCETIBILIDADE` das áreas `inundacao` que contêm o ponto |
+| `subprefeituras.json` | `[{ sigla, nome }]` | `dim_geosampa_subprefecture_area` (`SIG_SUBPREFEITURA`, `NOM_SUBPREFEITURA`); `sigla` é o código canônico usado pela fato |
+| `ocorrencias.json` | colunar: `{ ano_origem[], id[], data[], tipo[], subprefeitura[], lat[], lon[], grau_susc_inundacao[] }` | `fact_geosampa_flooding_events` + `dim_tempo` + dimensões de tipo e subprefeitura; `grau_susc_inundacao` é nulo até o cruzamento com áreas SGB estar publicado; nulo não significa fora de área suscetível |
 | `estacoes.json` | `{ chuva: [{ id, codigo, rede, nome, grandeza, instituicao, lat, lon, subprefeitura, ativa, tabela }], nivel: [... + curso_dagua, unidade] }` | `dim_cemaden_stations`, `dim_sibh_sensors`, `dim_inmet_stations`. `id` = `<rede>:<código>` |
 | `chuva_diaria.json` | `{ inicio, series: { id: [mm \| null, ...] } }` | Soma diária de `NUM_CHUVA_MM` das três fatos horárias de chuva; `null` = dia sem leitura |
 | `chuva_horaria.json` | `{ inicio, series: { id: [mm \| null] } }` (168 horas) | Fatos horárias de chuva; a hora é o início do intervalo, fuso de São Paulo |
@@ -63,3 +63,9 @@ Cada arquivo é `{ "meta": {...}, "data": ... }`. Campos de `meta`:
 | `avisos_oficiais.json` | `[]` + `meta.estado_integracao` | Sem fonte integrada |
 
 Para manter os arquivos leves, simplifique as geometrias para a escala de visualização e arredonde as coordenadas em 5 casas (cerca de 1 m).
+
+## Primeira exportação GeoSampa
+
+O notebook `data/src/geosampa/export/06_export_geosampa_web.py` lê as tabelas Gold, confirma a última execução das regras de qualidade e publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/geosampa_chuvasegura_web/`. A exportação mantém somente pontos com coordenadas no envelope validado de São Paulo e registra no manifesto quantos registros foram omitidos.
+
+Baixe os três arquivos do Volume para `app/data/gold/`. Depois, altere `DATA_ROOT` em `app/assets/js/config.js` para `data/gold` e publique o frontend. A aplicação usa o manifesto para sinalizar chuva, nível, suscetibilidade e outras fontes que ainda não estejam incluídas. O pacote real não inclui dados sintéticos.

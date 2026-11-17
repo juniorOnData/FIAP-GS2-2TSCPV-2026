@@ -135,7 +135,7 @@ function gateCard() {
       <div class="gate__head">
         <div>${icon("flask")}</div>
         <div><h3>Gate de Data Science: não aprovado</h3>
-        <p>Enquanto os critérios da seção 11 do PDR não forem atendidos, a plataforma mostra só análise histórica e suscetibilidade territorial. Nenhuma classe ou score de risco, previsão ou alerta é exibido.</p></div>
+        <p>Enquanto os critérios da seção 11 do PDR não forem atendidos, a plataforma mostra análises históricas e, quando publicada, suscetibilidade territorial. Nenhuma classe ou score de risco, previsão ou alerta é exibido.</p></div>
       </div>
       <details><summary>Ver os 6 critérios e a situação de cada um</summary>
         <ul class="gate__list">${GATE.map(([t, s, d]) => `<li>${b[s]}<span><strong>${esc(t)}</strong><small>${esc(d)}</small></span></li>`).join("")}</ul>

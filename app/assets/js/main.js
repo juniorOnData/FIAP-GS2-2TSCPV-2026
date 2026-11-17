@@ -134,7 +134,9 @@ store.subscribe(async (kind) => {
 async function boot() {
   try {
     const m = await loadManifest();
-    store.setBounds("2020-01-01", m.referencia.slice(0, 10));
+    const ocorrencias = m.datasets?.find((d) => d.id === "ocorrencias");
+    const primeiroDia = ocorrencias?.periodo?.inicio?.slice(0, 10) || "2020-01-01";
+    store.setBounds(primeiroDia, m.referencia.slice(0, 10));
     const sp = await load("subprefeituras");
     setSubprefeituras(sp.status === "ok" ? sp.data : []);
   } catch (err) {
