@@ -10,7 +10,7 @@ export default {
   async render(root) {
     const atual = store.perfil.id;
     root.innerHTML = `<div class="page">
-      ${pageHead({ eyebrow: "Perfil de uso", title: "Como você usa o ChuvaSegura-SP?", lead: "O perfil muda os atalhos da visão geral e as perguntas sugeridas pelo assistente." })}
+      ${pageHead({ eyebrow: "Perfil de uso", title: "Como você usa o ChuvaSegura-SP?", lead: "O perfil muda os atalhos dos indicadores e as perguntas sugeridas pelo assistente." })}
       ${stateBlock("info", "Sem login nem controle de acesso nesta versão", "Todos os perfis veem os mesmos dados. A escolha fica salva só neste navegador (quando o armazenamento local está disponível) e não é enviada a nenhum servidor.")}
       <fieldset class="profiles">
         <legend class="sr-only">Escolha o perfil</legend>

@@ -10,7 +10,7 @@
 # MAGIC 4. O pacote é gravado no Volume `fiap_analytics.gold.chuvasegura_web` (o `manifest.json` por último). **Tudo ou nada no site:** só vai ao GitHub se todas as fontes pedidas passaram. Se alguma falhar, o site continua com a versão anterior, o que passou fica no Volume para conferência e a tarefa termina com erro.
 # MAGIC 5. O commit só acontece se os dados mudaram (compara o SHA-256 de cada conjunto com o manifesto publicado).
 # MAGIC
-# MAGIC Widgets: `inicio_execucao` (preenchido pelo job; vazio numa execução manual = vale a qualidade mais recente), `fontes` (lista; tire uma fonte que ainda não rodou, como o INMET antes do backfill), `github_publicar` (`sim`/`nao`), `github_repo`, `github_branch` e `unidade_nivel` (confirme a unidade do SIBH: o site rotula o nível com ela).
+# MAGIC Widgets: `inicio_execucao` (preenchido pelo job; vazio numa execução manual = vale a qualidade mais recente), `fontes` (lista; tire uma fonte que ainda não rodou, como o INMET antes do backfill), `github_publicar` (`sim`/`nao`), `github_repo`, `github_branch` e `unidade_nivel_origem` (unidade da cota do SIBH, `cm` por padrão: o export converte para metros).
 # MAGIC
 # MAGIC Segredo: scope `github`, chave `token` (token do GitHub com *Contents: read and write* só neste repositório).
 
@@ -21,7 +21,7 @@ dbutils.widgets.text("fontes", "geosampa,cemaden,sibh,inmet", "Fontes a exportar
 dbutils.widgets.dropdown("github_publicar", "sim", ["sim", "nao"], "Enviar ao GitHub")
 dbutils.widgets.text("github_repo", "juniorOnData/FIAP-GS2-2TSCPV-2026", "Repositório (dono/nome)")
 dbutils.widgets.text("github_branch", "main", "Branch de produção da Vercel")
-dbutils.widgets.text("unidade_nivel", "m", "Unidade do nível no SIBH")
+dbutils.widgets.dropdown("unidade_nivel_origem", "cm", ["cm", "m"], "Unidade do nível na fonte (SIBH)")
 
 # COMMAND ----------
 
@@ -42,7 +42,7 @@ if _src not in sys.path:
     sys.path.append(_src)
 from common import github_publish  # noqa: E402
 from common.publicacao_web import (  # noqa: E402
-    DIA_INICIAL, DIAS_NIVEL, data_para_cod, hora_sp, iso_sp, json_bytes, pior_qualidade, serie_diaria, serie_horaria,
+    DIA_INICIAL, DIAS_NIVEL, FATOR_PARA_METRO, data_para_cod, hora_sp, iso_sp, json_bytes, pior_qualidade, serie_diaria, serie_horaria,
     sha256_dados,
 )
 
@@ -53,7 +53,7 @@ VOLUME = f"{CATALOG}.gold.chuvasegura_web"
 VOLUME_PATH = f"/Volumes/{CATALOG}/gold/chuvasegura_web"
 DIM_TEMPO = f"{CATALOG}.gold.dim_tempo"
 PASTA_SITE = "app/data/gold"  # destino no repositório
-VERSAO = "1.2.0"
+VERSAO = "1.3.0"
 
 AGORA_DT = datetime.now(ZoneInfo("America/Sao_Paulo"))
 AGORA = AGORA_DT.isoformat(timespec="seconds")
@@ -65,7 +65,8 @@ if DESCONHECIDAS:
 GITHUB_PUBLICAR = dbutils.widgets.get("github_publicar") == "sim"
 GITHUB_REPO = dbutils.widgets.get("github_repo").strip()
 GITHUB_BRANCH = dbutils.widgets.get("github_branch").strip()
-UNIDADE_NIVEL = dbutils.widgets.get("unidade_nivel").strip() or "m"
+UNIDADE_NIVEL_ORIGEM = dbutils.widgets.get("unidade_nivel_origem")
+FATOR_NIVEL = FATOR_PARA_METRO[UNIDADE_NIVEL_ORIGEM]
 ENVELOPE = (-24.1, -23.3, -47.0, -46.3)  # lat mín, lat máx, lon mín, lon máx (município e entorno)
 
 print(f"Publicação {VERSAO} em {AGORA} | fontes: {sorted(FONTES)} | início do job: {INICIO_EXECUCAO or '(execução manual)'}")
@@ -289,7 +290,7 @@ def cadastro_redes(redes):
             if r["DSC_GRANDEZA"] == "Chuva":
                 chuva.append(base)
             else:
-                nivel.append({**base, "curso_dagua": r["NOM_ESTACAO"] or f"Sensor {r['COD_SENSOR']}", "unidade": UNIDADE_NIVEL})
+                nivel.append({**base, "curso_dagua": r["NOM_ESTACAO"] or f"Sensor {r['COD_SENSOR']}", "unidade": "m"})
     return chuva, nivel
 
 
@@ -374,7 +375,7 @@ def exportar_nivel(cad_nivel):
     fato = REDES["sibh"]["fato_nivel"]
     agora_chave = data_para_cod(AGORA_DT.date()) * 100 + AGORA_DT.hour
     base = (spark.table(fato).where(F.col("NUM_NIVEL_MEDIO").isNotNull() & ((F.col("COD_DIM_TEMPO") * 100 + F.col("NUM_HORA")) <= agora_chave))
-            .select(F.concat(F.lit("sibh:"), "COD_SENSOR").alias("id"), "COD_DIM_TEMPO", "NUM_HORA", F.col("NUM_NIVEL_MEDIO").alias("v")))
+            .select(F.concat(F.lit("sibh:"), "COD_SENSOR").alias("id"), "COD_DIM_TEMPO", "NUM_HORA", (F.col("NUM_NIVEL_MEDIO") * F.lit(FATOR_NIVEL)).alias("v")))
     ids = {s["id"] for s in cad_nivel}
     base = base.where(F.col("id").isin(*ids)) if ids else base
     base = base.cache()
@@ -399,10 +400,12 @@ def exportar_nivel(cad_nivel):
                         [f"gold.{t}" for t in ("fact_sibh_level_hourly", "dim_sibh_sensors")], len(ids), qualidade,
                         periodo={"inicio": dia_ini.isoformat(), "fim": dia_final.isoformat()},
                         granularidade={"espacial": "sensor", "temporal": "hora (7 dias) e média diária (365 dias)"},
-                        extra={"unidade": UNIDADE_NIVEL, "referencia": iso_sp(hora_final),
+                        extra={"unidade": "m", "unidade_origem": UNIDADE_NIVEL_ORIGEM,
+                               "descricao_valor": "Cota informada pela fonte, convertida para metros: altitude da superfície da água na referência do sensor, não a profundidade do rio.",
+                               "referencia": iso_sp(hora_final),
                                "limiares": "Não há limiares oficiais de transbordamento integrados nesta versão."})
     data = {"horario_inicio": iso_sp(inicio_h), "horario": horario, "diario_inicio": dia_ini.isoformat(), "diario": diario}
-    print(f"Nível: {len(ids)} sensores; referência {iso_sp(hora_final)}; unidade informada: {UNIDADE_NIVEL}")
+    print(f"Nível: {len(ids)} sensores; referência {iso_sp(hora_final)}; cota convertida de {UNIDADE_NIVEL_ORIGEM} para m")
     return {"nivel.json": pacote("nivel.json", meta, data)}, sensores
 
 # COMMAND ----------

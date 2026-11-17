@@ -3,7 +3,7 @@ import { CONFIG } from "../config.js";
 import { icon } from "../icons.js";
 import { esc, fmtInt, fmt1, fmt2, fmtDateTime, fmtHourShort, fmtAge, fmtDay, addDays, $ } from "../util.js";
 import { store } from "../store.js";
-import { getStations, filterStations, rainLastHours, rainInPeriod, load, freshness, hourlyTimes } from "../data.js";
+import { getStations, filterStations, rainLastHours, rainInPeriod, load, freshness, hourlyTimes, serieNivel } from "../data.js";
 import { filterBar, bindFilterBar, subprefNome, stateBlock, resultState, natureBadge, freshnessBadge, provenance, card, table, badge } from "../ui.js";
 import { columnChart, lineChart, chartBlock, sparkline, RAIN_RAMP } from "../charts.js";
 
@@ -119,7 +119,7 @@ export default {
       if (bad) { host.innerHTML = bad; det.innerHTML = ""; return; }
       const sens = filterStations(st.est.data.nivel, store.filters);
       const rows = sens.map((s) => {
-        const h = nivel.data.horario[s.id];
+        const h = serieNivel(nivel, "horario", s.id);
         const ult = h[h.length - 1];
         const ant = h[h.length - 25];
         const v = h.filter((x) => x !== null);
@@ -128,7 +128,7 @@ export default {
       if (!selectedLevel || !sens.find((s) => s.id === selectedLevel)) selectedLevel = rows[0]?.s.id || null;
       host.innerHTML = card({
         title: "Sensores de nível",
-        sub: `Último valor horário até ${esc(fmtDateTime(nivel.meta.referencia))} · metros, na unidade informada pela fonte`,
+        sub: `Último valor horário até ${esc(fmtDateTime(nivel.meta.referencia))} · cota em metros`,
         actions: `<div class="pill-list">${natureBadge(nivel.meta)} ${freshnessBadge(nivel.meta, "nivel")}</div>`,
         body: `${stateBlock("info", "Sem classificação de nível", esc(nivel.meta.limiares) + " Por isso nenhum sensor é marcado como normal, atenção ou crítico.")}<div style="height:12px"></div>` + table(
           [
@@ -138,7 +138,7 @@ export default {
             { label: "7 dias", fmt: (r) => (r.h.some((x) => x !== null) ? sparkline(r.h, { width: 96, height: 24, bars: false, color: "#0F8A73" }) : "—") },
           ],
           rows,
-          { rowAttr: (r) => `class="is-clickable ${r.s.id === selectedLevel ? "is-selected" : ""}" data-lv="${esc(r.s.id)}" tabindex="0" aria-selected="${r.s.id === selectedLevel}"`, empty: "Nenhum sensor de nível no recorte." },
+          { caption: "Cota: altitude da superfície da água na referência do sensor, não a profundidade. Compare a variação de um mesmo sensor, não o valor entre sensores.", rowAttr: (r) => `class="is-clickable ${r.s.id === selectedLevel ? "is-selected" : ""}" data-lv="${esc(r.s.id)}" tabindex="0" aria-selected="${r.s.id === selectedLevel}"`, empty: "Nenhum sensor de nível no recorte." },
         ),
         foot: provenance(nivel.meta),
       });
@@ -150,20 +150,21 @@ export default {
       const s = st.est.data.nivel.find((x) => x.id === selectedLevel);
       if (!s) { det.innerHTML = ""; return; }
       const times = hourlyTimes({ data: { inicio: nivel.data.horario_inicio, series: nivel.data.horario } });
-      const hv = nivel.data.horario[s.id];
-      const dv = nivel.data.diario[s.id];
+      const hv = serieNivel(nivel, "horario", s.id);
+      const dv = serieNivel(nivel, "diario", s.id);
       const days = Array.from({ length: dv.length }, (_, i) => addDays(nivel.data.diario_inicio, i));
       det.innerHTML = card({
         title: s.curso_dagua, sub: `${esc(s.nome)} · ${esc(s.instituicao)}`,
         actions: `<a class="btn btn--ghost btn--sm" href="#/mapa?center=${s.lon},${s.lat}&zoom=14">${icon("map")}Ver no mapa</a>`,
-        body: `<h4 style="margin-bottom:4px">Nível horário — 7 dias</h4><p class="note">metros (unidade da fonte), média da hora</p><div id="lh"></div>
+        body: `<h4 style="margin-bottom:4px">Nível horário — 7 dias</h4><p class="note">cota em metros, média da hora</p><div id="lh"></div>
           <h4 style="margin:16px 0 4px">Nível médio diário — 12 meses</h4><div id="ld"></div>`,
       });
       const a = chartBlock(det.querySelector("#lh"), { tableHtml: table([{ key: "t", label: "Hora" }, { key: "v", label: "m", num: true }], times.map((t, i) => ({ t: fmtHourShort(t), v: hv[i] === null ? "sem leitura" : fmt2(hv[i]) })).reverse()) });
       if (hv.some((v) => v !== null)) lineChart(a, { labels: times.map((t) => (fmtHourShort(t).endsWith("00:00") ? fmtHourShort(t).slice(0, 5) : "")), series: [{ name: "Nível", color: "#0F8A73", values: hv }], unit: "m", height: 180, fmt: fmt2, minZero: false, tipTitle: (i) => fmtHourShort(times[i]), ariaLabel: "Nível horário" });
       else a.innerHTML = stateBlock("empty", "Sem leituras nos últimos 7 dias", "O sensor pode estar fora de operação.");
       const b = chartBlock(det.querySelector("#ld"), { tableHtml: table([{ key: "d", label: "Dia" }, { key: "v", label: "m", num: true }], days.map((d, i) => ({ d: fmtDay(d), v: dv[i] === null ? "sem leitura" : fmt2(dv[i]) })).reverse()) });
-      lineChart(b, { labels: days.map((d) => d.slice(5, 7) + "/" + d.slice(2, 4)), series: [{ name: "Nível", color: "#0F8A73", values: dv }], unit: "m", height: 180, fmt: fmt2, minZero: false, tipTitle: (i) => fmtDay(days[i]), ariaLabel: "Nível médio diário" });
+      if (!dv.some((v) => v !== null)) b.innerHTML = stateBlock("empty", "Sem leituras nos últimos 12 meses");
+      else lineChart(b, { labels: days.map((d) => d.slice(5, 7) + "/" + d.slice(2, 4)), series: [{ name: "Nível", color: "#0F8A73", values: dv }], unit: "m", height: 180, fmt: fmt2, minZero: false, tipTitle: (i) => fmtDay(days[i]), ariaLabel: "Nível médio diário" });
     };
 
     drawRain();

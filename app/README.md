@@ -52,8 +52,9 @@ app/
         ├── ui.js · charts.js · icons.js · util.js
         ├── insights.js         # insights descritivos (PDR 8.3)
         ├── content.js          # fontes, metodologia e base de conhecimento
-        └── pages/              # portal, overview, mapa, monitoramento, historico,
-                                # analises, dados, conhecimento, assistente, perfil
+        ├── regras-alerta.js    # regras de alerta da plataforma sobre chuva e nível observados
+        └── pages/              # portal, mapa, indicadores, monitoramento, alertas, historico,
+                                # analises (Previsões e Análises), dados, conhecimento, assistente, perfil
 ```
 
 ## Cobertura do PDR nesta versão
@@ -61,7 +62,8 @@ app/
 | Requisito | Situação |
 |---|---|
 | F01–F05 mapa, camadas, agrupamentos, filtros, detalhe | Feito: ocorrências agrupadas, chuva (1 h/24 h/72 h/período), nível, suscetibilidade; limites, setores e vias aparecem desabilitados com o motivo |
-| F06 visão geral · F13 central de painéis | Feito |
+| F06 indicadores · F13 central de painéis | Feito. O mapa é a entrada da plataforma |
+| Alertas da plataforma | Regras fixas sobre chuva e nível observados (não oficiais), com reconhecimento e tratamento salvos só no navegador. Envio por SMS ainda não configurado: exige serviço no servidor e login de operador |
 | F07 chuva por estação e janela | Feito, com estado de atualização |
 | F08 séries históricas | Feito (dia ou mês, conforme o período) |
 | F09 sobre os dados · F11 qualidade e linhagem | Feito (qualidade simulada no pacote de demonstração) |

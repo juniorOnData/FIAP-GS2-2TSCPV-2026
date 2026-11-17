@@ -73,7 +73,7 @@ resources:
               github_publicar: "sim"
               github_repo: juniorOnData/FIAP-GS2-2TSCPV-2026
               github_branch: main
-              unidade_nivel: m  # confirmar a unidade do nível no SIBH
+              unidade_nivel_origem: cm  # cota do SIBH em centímetros; o export converte para metros
             source: WORKSPACE
           environment_key: Default
       queue:

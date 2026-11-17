@@ -58,7 +58,7 @@ Cada arquivo é `{ "meta": {...}, "data": ... }`. Campos de `meta`:
 | `estacoes.json` | `{ chuva: [{ id, codigo, rede, nome, grandeza, instituicao, lat, lon, subprefeitura, ativa, tabela }], nivel: [... + curso_dagua, unidade] }` | `dim_cemaden_stations`, `dim_sibh_sensors`, `dim_inmet_stations`. `id` = `<rede>:<código>` |
 | `chuva_diaria.json` | `{ inicio, series: { id: [mm \| null, ...] } }` | Soma diária de `NUM_CHUVA_MM` das três fatos horárias de chuva; `null` = dia sem leitura |
 | `chuva_horaria.json` | `{ inicio, series: { id: [mm \| null] } }` (168 horas) | Fatos horárias de chuva; a hora é o início do intervalo, fuso de São Paulo |
-| `nivel.json` | `{ horario_inicio, horario: { id: [m] }, diario_inicio, diario: { id: [m] } }` | `fact_sibh_level_hourly` (`NUM_NIVEL_MEDIO`), 7 dias horários e 365 dias de média diária |
+| `nivel.json` | `{ horario_inicio, horario: { id: [m] }, diario_inicio, diario: { id: [m] } }` | `fact_sibh_level_hourly` (`NUM_NIVEL_MEDIO`), 7 dias horários e 365 dias de média diária. Sensor sem leitura no período fica fora de `horario`/`diario` |
 | `suscetibilidade.json` | `{ classes: [{ grau, classe, camada, caracteristicas }], areas: [{ id, camada, grau, classe, area_km2, poligono: [[lon, lat], ...] }] }`; `meta.area_uniao_km2` e `meta.area_municipio_km2` | `dim_sgb_susceptibility_areas` (camada `inundacao`, geometria simplificada) + `dim_sgb_susceptibility_class` |
 | `avisos_oficiais.json` | `[]` + `meta.estado_integracao` | Sem fonte integrada |
 
@@ -73,6 +73,6 @@ Particularidades dos dados reais:
 - **Estações:** `id` = `<rede>:<código>` (`cemaden:`, `sibh:`, `inmet:`). `subprefeitura` é `null`, porque a Gold não tem essa informação das estações; o filtro por subprefeitura não as inclui. Só entram estações com coordenadas no envelope do município e que estejam ativas ou tenham leitura.
 - **Chuva diária** (de 2020-01-01 até o dia de `meta.referencia`): soma das horas no fuso de São Paulo; dia sem leitura é `null`, nunca zero. Estação com mais de um sensor (CEMADEN): vale o maior valor de cada hora.
 - **Chuva horária:** últimas 168 horas; `meta.referencia` é a última hora com leitura em qualquer rede.
-- **Nível:** média por hora (7 dias) e média diária (365 dias), na unidade da fonte (`meta.unidade`).
+- **Nível:** média por hora (7 dias) e média diária (365 dias), sempre em metros (`meta.unidade = "m"`). É a cota informada pela fonte (altitude da superfície da água na referência do sensor), não a profundidade. `meta.unidade_origem` diz em que unidade a fonte publica (`cm` no SIBH); sem esse campo, o app suspende as regras de alerta de nível.
 - **Manifesto:** cada conjunto traz `sha256_dados`, usado para só gerar commit quando os dados mudam. `nao_publicados` lista o motivo de cada conjunto ausente, inclusive falhas da execução.
 - **Ocorrências:** descartadas as sem data ou fora do envelope (`registros_descartados`). `grau_susc_inundacao` é `null` até o cruzamento com o SGB ser publicado (nulo = "não cruzado").

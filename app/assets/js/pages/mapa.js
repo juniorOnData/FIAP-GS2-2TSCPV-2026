@@ -3,7 +3,7 @@ import { CONFIG } from "../config.js";
 import { icon } from "../icons.js";
 import { esc, fmtInt, fmt1, fmt2, fmtDay, fmtDateTime, groupCount, downloadText, $ } from "../util.js";
 import { store, resolvePeriod } from "../store.js";
-import { getOccurrences, filterOccurrences, getStations, filterStations, rainInPeriod, rainLastHours, load, bboxOf, isDemo, getManifest, hourlyTimes } from "../data.js";
+import { getOccurrences, filterOccurrences, getStations, filterStations, rainInPeriod, rainLastHours, load, bboxOf, isDemo, getManifest, hourlyTimes, serieNivel } from "../data.js";
 import { filterBar, bindFilterBar, subprefNome, stateBlock, resultState, natureBadge, freshnessBadge, badge, provenance, DEMO_MSG } from "../ui.js";
 import { sparkline, TYPE_COLORS } from "../charts.js";
 
@@ -253,8 +253,8 @@ function refreshData() {
   map.getSource("nivel").setData({
     type: "FeatureCollection",
     features: nv.map((s) => {
-      const serie = ctx.nivel.status === "ok" ? ctx.nivel.data.horario[s.id] : null;
-      const ult = serie ? serie[serie.length - 1] : null;
+      const serie = ctx.nivel.status === "ok" ? serieNivel(ctx.nivel, "horario", s.id) : null;
+      const ult = serie?.length ? serie[serie.length - 1] : null;
       return { type: "Feature", geometry: { type: "Point", coordinates: [s.lon, s.lat] }, properties: { id: s.id, sem: ult === null ? 1 : 0, rotulo: ult === null ? "sem dado" : `${fmt2(ult)} m` } };
     }),
   });
@@ -339,7 +339,7 @@ function renderLayersPanel() {
       </div>`, { disabled: ctx.st.est.status !== "ok", reason: "Dados de chuva não publicados nesta versão." }),
     layerRow("nivel", "Nível de rios e córregos", "Sensores fluviométricos do SIBH · último valor horário",
       `<div class="legend">
-        <div class="legend__row"><span class="legend__diamond" style="background:#0F8A73"></span>Sensor com leitura (m, unidade da fonte)</div>
+        <div class="legend__row"><span class="legend__diamond" style="background:#0F8A73"></span>Sensor com leitura (cota em m)</div>
         <div class="legend__row"><span class="legend__diamond" style="background:#94A3B8"></span>Sensor sem leitura recente</div>
         <div class="note">${esc(ctx.nivel.meta?.limiares || "")}</div>
       </div>`, { disabled: ctx.nivel.status !== "ok", reason: "Nível não publicado nesta versão." }),
@@ -522,8 +522,8 @@ function showStation(id) {
 function showLevel(id) {
   const s = ctx.st.est.data.nivel.find((x) => x.id === id);
   if (!s) return;
-  const serie = ctx.nivel.data.horario[id];
-  const ult = serie[serie.length - 1];
+  const serie = serieNivel(ctx.nivel, "horario", id);
+  const ult = serie.length ? serie[serie.length - 1] : null;
   const valid = serie.filter((v) => v !== null);
   const t = hourlyTimes({ data: { inicio: ctx.nivel.data.horario_inicio, series: ctx.nivel.data.horario } });
   openDetail(s.nome, `

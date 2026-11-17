@@ -9,7 +9,7 @@ O repositório tem duas partes independentes:
 | Pasta | O que tem | Detalhes |
 |---|---|---|
 | [`data/`](data) | Pipeline de dados no Databricks (Unity Catalog `fiap_analytics`, camadas Bronze, Silver e Gold): notebooks em `data/src/` e definições dos jobs em `data/jobs/`. Fontes: GeoSampa, CEMADEN, SIBH/SP Águas, SGB/CPRM, IBGE, OpenStreetMap e INMET. | [`data/README.md`](data/README.md) |
-| [`app/`](app) | Aplicação web do MVP (Fase 1): portal, visão geral, mapa, monitoramento, histórico, análises, sobre os dados, base de conhecimento, assistente e perfis. Site estático, publicado na Vercel com `Root Directory = app`. | [`app/README.md`](app/README.md) |
+| [`app/`](app) | Aplicação web do MVP (Fase 1): portal, mapa, indicadores, monitoramento, alertas, histórico, previsões e análises, sobre os dados, base de conhecimento, assistente e perfis. Site estático, publicado na Vercel com `Root Directory = app`. | [`app/README.md`](app/README.md) |
 | [`docs/`](docs) | Documento de produto: [PDR do ChuvaSegura-SP](docs/PDR_CHUVASEGURA_SP.md). | |
 
 A aplicação não lê o Databricks diretamente: ela consome arquivos exportados da Gold, no contrato descrito em [`app/DATA_CONTRACT.md`](app/DATA_CONTRACT.md). Enquanto esses exports não existem, a aplicação roda em **modo demonstração**, com dados sintéticos sempre identificados como tais.

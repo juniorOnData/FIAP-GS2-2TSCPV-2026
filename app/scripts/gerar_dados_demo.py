@@ -489,7 +489,7 @@ def main() -> None:
         "meta": meta("nivel", "Nível de rios e córregos", FONTES["sibh"], ["gold.fact_sibh_level_hourly", "gold.dim_sibh_sensors"],
                      "observado", ref, registros=len(sensores_nivel),
                      periodo={"inicio": (ref.date() - timedelta(days=364)).isoformat(), "fim": ref.date().isoformat()},
-                     unidade="m (unidade informada pela fonte)",
+                     unidade="m", unidade_origem="m",
                      granularidade={"espacial": "sensor", "temporal": "hora (7 dias) e média diária (365 dias)"},
                      referencia=ts(ref), licenca="Dados públicos do SIBH",
                      limiares="Não há limiares oficiais de transbordamento integrados nesta versão."),

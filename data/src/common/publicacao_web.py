@@ -12,6 +12,7 @@ TZ_SP = timezone(timedelta(hours=-3))
 DIA_INICIAL = date(2020, 1, 1)  # início da cobertura de chuva (CEMADEN, SIBH e INMET)
 HORAS_RECENTES = 168  # 7 dias
 DIAS_NIVEL = 365
+FATOR_PARA_METRO = {"cm": 0.01, "m": 1.0}  # unidade da cota na fonte -> metros (unidade publicada)
 
 
 def cod_para_data(cod_dim_tempo):
