@@ -10,6 +10,7 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 | **SGB / CPRM** | Carta de suscetibilidade a movimentos de massa e inundações do município (IPT/CPRM, 2015): áreas de suscetibilidade, bacias contribuintes e padrões de relevo | Download público (RIGEO) |
 | **IBGE** | Censo 2022: malha de setores censitários com pessoas e domicílios, para estimar a população exposta | Download público (FTP do IBGE) |
 | **OpenStreetMap** | Rede viária (extrato da Geofabrik), sob a licença ODbL, que exige atribuição | Download público (Geofabrik) |
+| **INMET** | Dados meteorológicos horários das estações automáticas da capital (chuva, temperatura, umidade, pressão, vento e radiação), a partir de 2020 | Download público (portal do INMET) |
 
 ## Arquitetura
 
@@ -22,7 +23,7 @@ flowchart LR
     SIBH[SIBH api/v2]
   end
   GPKG[Arquivos GeoSampa]
-  PUB[Downloads públicos<br/>SGB, IBGE, OSM]
+  PUB[Downloads públicos<br/>SGB, IBGE, OSM, INMET]
   subgraph bronze
     VOL[(Volumes: arquivos brutos<br/>JSON gzip / GPKG / shapefile)]
     BT[Tabelas Bronze<br/>tudo em string]
@@ -59,6 +60,7 @@ Situação atual:
 | SGB | ✅ | ✅ | ✅ | ✅ |
 | IBGE | ✅ | ✅ | ✅ | ✅ |
 | OpenStreetMap | ✅ | ✅ | ✅ | ✅ |
+| INMET | ✅ | ✅ | ✅ | ✅ |
 
 ## Estrutura do repositório
 
@@ -69,6 +71,7 @@ jobs/                                             # definição dos jobs do Data
 ├── chuvasegura_cemaden.job.yml
 ├── chuvasegura_geosampa.job.yml
 ├── chuvasegura_ibge.job.yml
+├── chuvasegura_inmet.job.yml
 ├── chuvasegura_osm.job.yml
 ├── chuvasegura_sgb.job.yml
 └── chuvasegura_sibh.job.yml
@@ -159,20 +162,35 @@ src/
 │       └── gold/
 │           ├── 04_dim_ibge_census_tracts.sql
 │           └── 05_fact_ibge_census_tract_population.sql
-└── osm/
+├── osm/
+│   ├── ingestion/
+│   │   └── 01_osm_roads_landing.py
+│   ├── quality/
+│   │   ├── 03_osm_silver_quality.py
+│   │   └── 05_osm_gold_quality.py
+│   └── transformations/
+│       ├── bronze/
+│       │   └── 02_osm_roads_bronze.py
+│       ├── silver/
+│       │   └── 03_osm_roads_silver.py
+│       └── gold/
+│           ├── 04_dim_osm_road_class.sql
+│           └── 05_dim_osm_roads.sql
+└── inmet/
     ├── ingestion/
-    │   └── 01_osm_roads_landing.py
+    │   └── 01_inmet_weather_landing.py
     ├── quality/
-    │   ├── 03_osm_silver_quality.py
-    │   └── 05_osm_gold_quality.py
+    │   ├── 03_inmet_silver_quality.py
+    │   └── 05_inmet_gold_quality.py
     └── transformations/
         ├── bronze/
-        │   └── 02_osm_roads_bronze.py
+        │   └── 02_inmet_weather_bronze.py
         ├── silver/
-        │   └── 03_osm_roads_silver.py
+        │   ├── 03_inmet_stations_silver.py
+        │   └── 03_inmet_weather_readings_silver.py
         └── gold/
-            ├── 04_dim_osm_road_class.sql
-            └── 05_dim_osm_roads.sql
+            ├── 04_dim_inmet_stations.sql
+            └── 05_fact_inmet_weather_hourly.sql
 ```
 
 Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` começando com `Databricks notebook source`). O Databricks os abre como notebooks normais, com as células separadas.
@@ -339,6 +357,27 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - **Silver:** sentido (`oneway`), velocidade máxima, ponte e túnel tipados. A geometria do OSM vem em WGS84 (EPSG 4326), que é tratado como igual ao SIRGAS 2000 (a diferença é menor que 1 m), e é gravada como EPSG 4674. O comprimento é calculado em UTM 23S.
 - **Gold:** `dim_osm_road_class` (classes da Geofabrik com descrição em português, grupo, hierarquia viária e se a via é de veículos) e `dim_osm_roads` (dimensão espacial, uma via por linha, com nome, sentido, velocidade, ponte, túnel, comprimento, centroide, envelope e geometria). As duas têm o membro `-1`. A cada extrato novo, as vias que mudaram são atualizadas e as que saíram do OSM são removidas.
 
+### INMET (dados meteorológicos horários)
+
+| # | Notebook | Widgets |
+|---|---|---|
+| 1 | `01_inmet_weather_landing` | `modo`: `backfill` ou `incremental`; `ano_inicio` (2020, mínimo); `estacoes` (`A701,A771`); `forcar`: `nao`/`sim` |
+| 2 | `02_inmet_weather_bronze` | (sem widgets: carrega os anos pendentes segundo o log) |
+| 3 | `03_inmet_stations_silver` | (sem widgets: recria a Silver a partir da Bronze) |
+| 3 | `03_inmet_weather_readings_silver` | `window`: `pending` (padrão), `all` ou `AAAA` |
+| 3 | `03_inmet_silver_quality` (pasta `quality/`) | (sem widgets) |
+| 4 | `04_dim_inmet_stations` | (sem widgets) |
+| 5 | `05_fact_inmet_weather_hourly` | (sem widgets: recarrega os meses novos ou alterados) |
+| 5 | `05_inmet_gold_quality` (pasta `quality/`) | (sem widgets) |
+
+- **Por que entra:** o INMET traz variáveis que o CEMADEN e o SIBH não têm (temperatura, umidade, pressão, vento e radiação). Também mede chuva, numa rede independente.
+- **Fonte:** dados históricos anuais do BDMEP (`https://portal.inmet.gov.br/uploads/dadoshistoricos/AAAA.zip`, cerca de 100 MB por ano, um CSV por estação automática do país). A landing lê do zip só os CSVs das estações da capital: A701 (São Paulo - Mirante) e A771 (São Paulo - Interlagos). A755 (Barueri) fica de fora porque é de outro município. O portal exige um User-Agent; os downloads usam o do projeto (`ChuvaSegura-FIAP/1.0`).
+- **Período:** a partir de 2020, como o CEMADEN e o SIBH.
+- **Ano parcial:** o INMET atualiza o zip do ano corrente mais ou menos uma vez por mês. Um ano só fica `SUCESSO` quando baixado a partir de fevereiro do ano seguinte; antes disso fica `PARCIAL` e o incremental confere de novo. Zip sem alteração na fonte e ano ainda não publicado entram como `SEM_DADOS`.
+- **Bronze:** o CSV é lido em Python (texto em Latin-1, `;`, 8 linhas de cabeçalho da estação). As colunas ganham nomes curtos (`precipitacao_total_mm`, `temperatura_ar_c`...), e uma coluna desconhecida para a carga. Valores ficam em texto, com vírgula decimal e `-9999` para falta.
+- **Silver:** `Data` e `Hora UTC` viram `dt_hr_medicao_utc`. As medidas do INMET valem para a hora que termina no horário da medição (a chuva das 13:00 UTC é a de 12:00 a 13:00 UTC). Por isso o dia e a hora no fuso de São Paulo saem do início da hora (`dt_hr_inicio_utc`), e a hora 9 da fato reúne o que aconteceu entre 09:00 e 09:59, como no CEMADEN e no SIBH. `-9999` vira nulo.
+- **Gold:** `dim_inmet_stations` (membro `-1`) e `fact_inmet_weather_hourly`, uma linha por estação, dia e hora, com chuva, temperatura (média, máxima e mínima), ponto de orvalho, umidade, pressão, vento e radiação. A carga é incremental por mês, com a mesma assinatura das outras fatos.
+
 ## Jobs e workflows
 
 Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YAML dos jobs do Databricks (`resources.jobs`). Separar por fonte faz com que uma falha numa API não trave as outras.
@@ -351,6 +390,7 @@ Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YA
 | `jobs/chuvasegura_sgb.job.yml` | `ChuvaSegura - SGB` | dia 1 de cada mês às 06:00 | ativo |
 | `jobs/chuvasegura_ibge.job.yml` | `ChuvaSegura - IBGE` | dia 1 de cada mês às 06:30 | ativo |
 | `jobs/chuvasegura_osm.job.yml` | `ChuvaSegura - OSM` | toda segunda-feira às 05:00 | ativo |
+| `jobs/chuvasegura_inmet.job.yml` | `ChuvaSegura - INMET` | toda segunda-feira às 08:00 | pausado até o backfill |
 
 ```mermaid
 flowchart LR
@@ -414,20 +454,34 @@ flowchart LR
     OQ1 --> O4[04_dim_osm_road_class] --> O5[05_dim_osm_roads]
     O5 --> OQ2{{05_osm_gold_quality}}
   end
+  subgraph inmet["ChuvaSegura - INMET"]
+    N1[01_inmet_weather_landing<br/>modo = incremental] --> N2[02_inmet_weather_bronze]
+    N2 --> N3[03_inmet_stations_silver]
+    N2 --> N4[03_inmet_weather_readings_silver]
+    N3 --> NQ1{{03_inmet_silver_quality}}
+    N4 --> NQ1
+    NQ1 --> N5[04_dim_inmet_stations] --> N6[05_fact_inmet_weather_hourly]
+    NQ1 --> N6
+    NT[00_dim_tempo] --> N6
+    N6 --> NQ2{{05_inmet_gold_quality}}
+  end
 ```
 
 Todos os jobs:
 - rodam em compute serverless (ambiente 6), com fila habilitada;
 - apontam para os notebooks no Git folder `/Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026`. Se o repositório estiver clonado em outro lugar, troque esse prefixo em todos os arquivos de `jobs/`.
 
-**Antes de ativar CEMADEN e SIBH:**
+**Antes de ativar CEMADEN, SIBH e INMET:**
 1. Rode uma vez, manualmente, a carga do histórico com o modo `backfill`:
    - CEMADEN: `01_cemaden_rainfall_readings_landing` com `modo = backfill`;
-   - SIBH: `03_sibh_measurements_landing` com `mode = backfill`.
+   - SIBH: `03_sibh_measurements_landing` com `mode = backfill`;
+   - INMET: `01_inmet_weather_landing` com `modo = backfill` (de 2020 até o ano corrente, poucos minutos).
 2. Rode as Bronzes correspondentes.
-3. Mude `pause_status` para `UNPAUSED`, ou ative a agenda na interface.
+3. Mude `pause_status` para `UNPAUSED`, ou ative a agenda na interface. O job do INMET vem com a agenda pausada por isso.
 
-O incremental diário cobre o mês atual e completa os meses parciais.
+O incremental diário cobre o mês atual e completa os meses parciais (no INMET, o ano atual e os anos parciais).
+
+**SGB, IBGE e OSM** não precisam de carga inicial: a primeira execução do job baixa a versão atual.
 
 **Como aplicar os YAMLs:**
 - **Job que já existe** (`ChuvaSegura`): troque o caminho de cada tarefa pelo do YAML. Em *Workflows → ChuvaSegura*, abra cada tarefa e edite o campo *Path*.
@@ -446,6 +500,7 @@ Cada origem tem a sua tabela de log, todas no mesmo formato, definido em `src/co
 - `fiap_analytics.bronze.sgb_ingestion_log`
 - `fiap_analytics.bronze.ibge_ingestion_log`
 - `fiap_analytics.bronze.osm_ingestion_log`
+- `fiap_analytics.bronze.inmet_ingestion_log`
 
 Colunas: `batch_id, fonte, etapa, janela, status, registros, paginas, duplicados, arquivo, sha256, duracao_s, iniciado_em, finalizado_em, mensagem`.
 
@@ -480,7 +535,7 @@ As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como 
   - `AVISO`: só registra.
 - **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
 - **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
-- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log`, `fiap_analytics.bronze.sgb_data_quality_log`, `fiap_analytics.bronze.ibge_data_quality_log` e `fiap_analytics.bronze.osm_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log`, `fiap_analytics.bronze.sgb_data_quality_log`, `fiap_analytics.bronze.ibge_data_quality_log`, `fiap_analytics.bronze.osm_data_quality_log` e `fiap_analytics.bronze.inmet_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
 
 Regras do GeoSampa:
 
@@ -524,6 +579,13 @@ Regras do OpenStreetMap:
 | Silver | tabela não vazia; mesmas vias da Bronze; pelo menos 15 mil km de vias de veículos no recorte; `osm_id` preenchido e único; classe preenchida; geometria de origem em EPSG 4326, preenchida e linear; comprimento maior que zero; vias dentro da área de São Paulo; sentido `B`, `F` ou `T` | classe fora do esquema da Geofabrik; vias com mais de 50 km; velocidade fora de 5 a 130 km/h; mais de 20% das vias de veículos sem nome |
 | Gold | dimensões não vazias; chaves únicas e membro `-1`; vias e extensão iguais às da Silver em cada classe; classe existente na dimensão; geometria preenchida; centroide dentro do envelope | vias com classe `-1` |
 
+Regras do INMET:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | estações: tabela não vazia, código único, latitude e longitude preenchidas e dentro da área de São Paulo; medições: tabela não vazia, uma linha por chave distinta da Bronze, estação preenchida e cadastrada, data e hora preenchidas, em hora cheia e entre 2020 e agora, chuva e vento não negativos | medição fora do ano do arquivo; mais de 10% sem chuva; horas acima de 100 mm; temperatura fora de -5 a 45 °C; umidade fora de 0 a 100%; pressão fora de 850 a 1000 mb |
+| Gold | fato não vazia, com uma linha por estação, dia e hora, e as mesmas horas e chuva da Silver em cada mês; chaves existentes na `dim_tempo` e na dimensão de estações; chuva não negativa; no máximo 24 horas por estação e dia; dimensão com chaves únicas e membro `-1` | horas com estação `-1`; temperatura mínima acima da máxima |
+
 Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
 
 ```sql
@@ -552,6 +614,8 @@ ORDER BY executado_em DESC;
 | bronze | `ibge_data_quality_log` | Resultados das regras de qualidade do IBGE |
 | bronze | `osm_roads` | Vias do OpenStreetMap no recorte do município, atributos em texto e geometria em WKB (EPSG 4326) |
 | bronze | `osm_data_quality_log` | Resultados das regras de qualidade do OpenStreetMap |
+| bronze | `inmet_weather_readings` | Medições horárias do INMET a partir de 2020, em texto como no CSV, uma fatia por ano (`_window`) |
+| bronze | `inmet_data_quality_log` | Resultados das regras de qualidade do INMET |
 | silver | `sibh_stations` | Sensores de chuva e nível do SIBH na capital, uma linha por sensor, tipados |
 | silver | `sibh_measurements` | Medições de chuva e nível tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `cemaden_stations` | Estações do CEMADEN no município, uma linha por estação, tipadas |
@@ -559,6 +623,8 @@ ORDER BY executado_em DESC;
 | silver | `sgb_susceptibility_areas` | Áreas da carta de suscetibilidade, com camada e classe padronizadas, geometria em EPSG 4674, área, centroide e envelope |
 | silver | `ibge_census_tracts` | Setores censitários tipados, com situação, tipo, distrito, favela, pessoas, domicílios, densidade, geometria, centroide e envelope |
 | silver | `osm_roads` | Vias tipadas, com classe, nome, sentido, velocidade, ponte, túnel, geometria, comprimento, centroide e envelope |
+| silver | `inmet_stations` | Estações automáticas do INMET na capital, uma linha por estação |
+| silver | `inmet_weather_readings` | Medições horárias tipadas e sem duplicidade, com hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_cemaden_stations` | Dimensão de estações do CEMADEN, com o membro `-1` (não informado) |
@@ -575,6 +641,8 @@ ORDER BY executado_em DESC;
 | gold | `fact_ibge_census_tract_population` | Fato de pessoas e domicílios por setor censitário na data de referência do Censo 2022 |
 | gold | `dim_osm_road_class` | Dimensão de classes de via do OpenStreetMap, com hierarquia viária, com o membro `-1` |
 | gold | `dim_osm_roads` | Dimensão espacial das vias do OpenStreetMap, uma via por linha, com o membro `-1` |
+| gold | `dim_inmet_stations` | Dimensão de estações do INMET, com o membro `-1` |
+| gold | `fact_inmet_weather_hourly` | Fato de condições meteorológicas por estação, dia e hora |
 
 ## Desenvolvimento
 
@@ -593,3 +661,4 @@ ORDER BY executado_em DESC;
 - **SGB:** Serviço Geológico do Brasil (SGB/CPRM) e Instituto de Pesquisas Tecnológicas (IPT). *Carta de suscetibilidade a movimentos gravitacionais de massa e inundações: município de São Paulo - SP*, 2015, escala 1:75.000. Disponível no RIGEO.
 - **IBGE:** Instituto Brasileiro de Geografia e Estatística. Censo Demográfico 2022: Agregados por Setores Censitários (resultados do universo) e malha de setores censitários.
 - **OpenStreetMap:** © colaboradores do OpenStreetMap. Dados disponíveis sob a Open Database License (ODbL 1.0), https://www.openstreetmap.org/copyright. Extrato da Geofabrik GmbH (download.geofabrik.de).
+- **INMET:** Instituto Nacional de Meteorologia, Banco de Dados Meteorológicos (BDMEP), dados históricos das estações automáticas.
