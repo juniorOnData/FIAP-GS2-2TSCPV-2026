@@ -15,11 +15,12 @@
 # MAGIC 2. Um arquivo `ano=AAAA/mes=MM/readings_AAAAMM.json.gz` por mês, em JSON por linha, com os registros exatamente como a API devolve.
 # MAGIC 3. Mês completo só quando baixado pelo menos 3 dias depois de terminar (`CARENCIA`). Antes disso entra como `PARCIAL` no `cemaden_ingestion_log`.
 # MAGIC 4. O `cemaden_ingestion_log` serve de checkpoint: rodar de novo continua de onde parou.
+# MAGIC 5. Só baixa meses a partir de janeiro de 2020 (`MES_MINIMO`), o mesmo início do SIBH. Um `mes_inicio` anterior é trocado por `MES_MINIMO`.
 
 # COMMAND ----------
 
 dbutils.widgets.dropdown("modo", "backfill", ["backfill", "incremental"], "Modo")
-dbutils.widgets.text("mes_inicio", "201401", "Mês inicial (AAAAMM)")
+dbutils.widgets.text("mes_inicio", "202001", "Mês inicial (AAAAMM, mínimo 202001)")
 dbutils.widgets.text("mes_fim", "", "Mês final (AAAAMM, vazio = último mês fechado)")
 dbutils.widgets.dropdown("forcar_reprocesso", "nao", ["nao", "sim"], "Rebaixar meses já carregados")
 
@@ -55,6 +56,7 @@ MARGEM_TOKEN = timedelta(minutes=15)  # um mês leva poucos minutos; o token pre
 TENTATIVAS_HTTP = 5
 TENTATIVAS_MES = 3
 CARENCIA = timedelta(days=3)  # o mês só é dado como completo se foi baixado 3 dias depois de terminar
+MES_MINIMO = "202001"  # o histórico desde 2014 deixava a Bronze com ~17 milhões de linhas; o projeto usa 2020 em diante
 
 BATCH_ID = str(uuid.uuid4())
 MODO = dbutils.widgets.get("modo")
@@ -276,11 +278,15 @@ parciais = {row.janela for row in situacao if row.parcial and not row.concluido}
 if MODO == "incremental":
     # Mês atual, mês anterior enquanto não estiver concluído e meses baixados antes de fechar
     # que ainda não foram completados (por exemplo, se o job ficou dias sem rodar).
-    candidatos = {mes_atual, mes_anterior} | {(int(j[:4]), int(j[4:])) for j in parciais}
+    candidatos = {mes_atual, mes_anterior} | {(int(j[:4]), int(j[4:])) for j in parciais if j >= MES_MINIMO}
     meses = sorted(m for m in candidatos if f"{m[0]}{m[1]:02d}" not in concluidos)
 else:
+    inicio = dbutils.widgets.get("mes_inicio").strip() or MES_MINIMO
+    if inicio < MES_MINIMO:
+        log(f"mes_inicio {inicio} é anterior a {MES_MINIMO}, o início do período do projeto. Usando {MES_MINIMO}.")
+        inicio = MES_MINIMO
     fim = dbutils.widgets.get("mes_fim").strip() or f"{mes_anterior[0]}{mes_anterior[1]:02d}"
-    meses = lista_meses(dbutils.widgets.get("mes_inicio").strip(), fim)
+    meses = lista_meses(inicio, fim)
     if not FORCAR:
         meses = [m for m in meses if f"{m[0]}{m[1]:02d}" not in concluidos]
 

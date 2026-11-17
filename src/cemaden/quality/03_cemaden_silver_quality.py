@@ -69,8 +69,8 @@ regras = [
 
     # Leituras: data e hora
     nao_nulo(LEITURAS, "dt_hr_leitura_utc"),
-    condicao("data_no_periodo", LEITURAS, "Leitura entre 2010-01-01 (início da dim_tempo) e agora",
-             "dt_leitura < DATE'2010-01-01' OR dt_hr_leitura_utc > current_timestamp() + INTERVAL 1 HOUR"),
+    condicao("data_no_periodo", LEITURAS, "Leitura entre 2020-01-01 UTC (início do período do projeto) e agora",
+             "dt_hr_leitura_utc < TIMESTAMP'2020-01-01 00:00:00' OR dt_hr_leitura_utc > current_timestamp() + INTERVAL 1 HOUR"),
     condicao("data_hora_no_mes_da_janela", LEITURAS, "Data e hora em UTC dentro do mês pedido à API (confere a premissa de UTC)",
              "date_format(dt_hr_leitura_utc, 'yyyyMM') <> _window", severidade="AVISO", limite=0.01),
 
