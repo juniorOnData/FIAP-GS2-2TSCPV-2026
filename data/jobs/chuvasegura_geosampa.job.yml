@@ -1,11 +1,10 @@
+# Job do GeoSampa: ocorrências históricas e subprefeituras, da Bronze até a Gold.
+# A qualidade da Silver barra a Gold.
+# Sem agenda própria: roda dentro do job ChuvaSegura (chuvasegura.job.yml), depois da dim_tempo.
 resources:
   jobs:
-    ChuvaSegura:
-      name: ChuvaSegura
-      schedule:
-        quartz_cron_expression: 30 0 9 * * ?
-        timezone_id: America/Sao_Paulo
-        pause_status: UNPAUSED
+    ChuvaSegura_GeoSampa:
+      name: ChuvaSegura - GeoSampa
       tasks:
         - task_key: ingestion_history_flooding_events
           notebook_task:
@@ -41,13 +40,8 @@ resources:
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/transformations/gold/03_dim_geosampa_type_flooding_events
             source: WORKSPACE
-        - task_key: dim_tempo
-          notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/transformations/gold/00_dim_tempo
-            source: WORKSPACE
         - task_key: gold_geosampa_flooding_events
           depends_on:
-            - task_key: dim_tempo
             - task_key: dim_geosampa_type_flooding_events
             - task_key: dim_geosampa_subprefecture_area
             - task_key: quality_silver_geosampa

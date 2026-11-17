@@ -1,14 +1,11 @@
 # Job do SGB: carta de suscetibilidade a movimentos de massa e inundações do município de São Paulo, da landing até a Gold.
-# A carta é estática (2015): a landing só baixa de novo se o pacote mudar no RIGEO, então a agenda mensal é barata.
+# A carta é estática (2015): a landing só baixa de novo se o pacote mudar no RIGEO, então rodar todo dia é barato.
 # A qualidade da Silver barra a Gold.
+# Sem agenda própria: roda dentro do job ChuvaSegura (chuvasegura.job.yml), depois da dim_tempo.
 resources:
   jobs:
     ChuvaSegura_SGB:
       name: ChuvaSegura - SGB
-      schedule:
-        quartz_cron_expression: "0 0 6 1 * ?"
-        timezone_id: America/Sao_Paulo
-        pause_status: UNPAUSED
       tasks:
         - task_key: sgb_susceptibility_landing
           notebook_task:

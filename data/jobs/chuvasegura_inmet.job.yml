@@ -1,14 +1,11 @@
 # Job do INMET: dados meteorológicos horários das estações automáticas do município de São Paulo, da landing até a Gold.
 # O INMET atualiza o zip do ano corrente mais ou menos uma vez por mês; a landing só baixa de novo quando o zip muda,
-# então a agenda semanal é barata. A qualidade da Silver barra a Gold.
+# então rodar todo dia é barato. A qualidade da Silver barra a Gold.
+# Sem agenda própria: roda dentro do job ChuvaSegura (chuvasegura.job.yml), depois da dim_tempo.
 resources:
   jobs:
     ChuvaSegura_INMET:
       name: ChuvaSegura - INMET
-      schedule:
-        quartz_cron_expression: "0 0 8 ? * MON"
-        timezone_id: America/Sao_Paulo
-        pause_status: PAUSED
       tasks:
         - task_key: inmet_weather_landing
           notebook_task:
@@ -49,14 +46,9 @@ resources:
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/inmet/transformations/gold/04_dim_inmet_stations
             source: WORKSPACE
-        - task_key: dim_tempo
-          notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/transformations/gold/00_dim_tempo
-            source: WORKSPACE
         - task_key: gold_inmet_weather_hourly
           depends_on:
             - task_key: dim_inmet_stations
-            - task_key: dim_tempo
             - task_key: quality_silver_inmet
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/inmet/transformations/gold/05_fact_inmet_weather_hourly
