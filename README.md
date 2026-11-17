@@ -9,6 +9,7 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 | **GeoSampa** | Ocorrências de alagamento, deslizamento, inundação e queda de árvore, além das subprefeituras | Arquivos baixados e enviados ao volume |
 | **SGB / CPRM** | Carta de suscetibilidade a movimentos de massa e inundações do município (IPT/CPRM, 2015): áreas de suscetibilidade, bacias contribuintes e padrões de relevo | Download público (RIGEO) |
 | **IBGE** | Censo 2022: malha de setores censitários com pessoas e domicílios, para estimar a população exposta | Download público (FTP do IBGE) |
+| **OpenStreetMap** | Rede viária (extrato da Geofabrik), sob a licença ODbL, que exige atribuição | Download público (Geofabrik) |
 
 ## Arquitetura
 
@@ -21,7 +22,7 @@ flowchart LR
     SIBH[SIBH api/v2]
   end
   GPKG[Arquivos GeoSampa]
-  PUB[Downloads públicos<br/>SGB, IBGE]
+  PUB[Downloads públicos<br/>SGB, IBGE, OSM]
   subgraph bronze
     VOL[(Volumes: arquivos brutos<br/>JSON gzip / GPKG / shapefile)]
     BT[Tabelas Bronze<br/>tudo em string]
@@ -57,6 +58,7 @@ Situação atual:
 | GeoSampa | ✅ | ✅ | ✅ | ✅ |
 | SGB | ✅ | ✅ | ✅ | ✅ |
 | IBGE | ✅ | ✅ | ✅ | ✅ |
+| OpenStreetMap | ✅ | ✅ | ✅ | ✅ |
 
 ## Estrutura do repositório
 
@@ -67,6 +69,7 @@ jobs/                                             # definição dos jobs do Data
 ├── chuvasegura_cemaden.job.yml
 ├── chuvasegura_geosampa.job.yml
 ├── chuvasegura_ibge.job.yml
+├── chuvasegura_osm.job.yml
 ├── chuvasegura_sgb.job.yml
 └── chuvasegura_sibh.job.yml
 src/
@@ -142,20 +145,34 @@ src/
 │       └── gold/
 │           ├── 04_dim_sgb_susceptibility_class.sql
 │           └── 05_dim_sgb_susceptibility_areas.sql
-└── ibge/
+├── ibge/
+│   ├── ingestion/
+│   │   └── 01_ibge_census_tracts_landing.py
+│   ├── quality/
+│   │   ├── 03_ibge_silver_quality.py
+│   │   └── 05_ibge_gold_quality.py
+│   └── transformations/
+│       ├── bronze/
+│       │   └── 02_ibge_census_tracts_bronze.py
+│       ├── silver/
+│       │   └── 03_ibge_census_tracts_silver.py
+│       └── gold/
+│           ├── 04_dim_ibge_census_tracts.sql
+│           └── 05_fact_ibge_census_tract_population.sql
+└── osm/
     ├── ingestion/
-    │   └── 01_ibge_census_tracts_landing.py
+    │   └── 01_osm_roads_landing.py
     ├── quality/
-    │   ├── 03_ibge_silver_quality.py
-    │   └── 05_ibge_gold_quality.py
+    │   ├── 03_osm_silver_quality.py
+    │   └── 05_osm_gold_quality.py
     └── transformations/
         ├── bronze/
-        │   └── 02_ibge_census_tracts_bronze.py
+        │   └── 02_osm_roads_bronze.py
         ├── silver/
-        │   └── 03_ibge_census_tracts_silver.py
+        │   └── 03_osm_roads_silver.py
         └── gold/
-            ├── 04_dim_ibge_census_tracts.sql
-            └── 05_fact_ibge_census_tract_population.sql
+            ├── 04_dim_osm_road_class.sql
+            └── 05_dim_osm_roads.sql
 ```
 
 Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` começando com `Databricks notebook source`). O Databricks os abre como notebooks normais, com as células separadas.
@@ -304,6 +321,24 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - **Silver:** códigos `.` viram nulo; a situação detalhada e o tipo do setor ganham a descrição do dicionário de dados do IBGE; `fl_favela` marca os 3.875 setores de favelas e comunidades urbanas. A geometria já vem em SIRGAS 2000 geográfico (EPSG 4674) e é mantida. A área calculada em UTM fica a até 0,03% da área publicada pelo IBGE, e a densidade usa a área do IBGE.
 - **Gold:** `dim_ibge_census_tracts` (dimensão espacial, um setor por linha, com distrito, favela, área, centroide, envelope e geometria) e `fact_ibge_census_tract_population` (pessoas e domicílios por setor na data de referência do Censo, 31/07/2022, chave `20220731` da `dim_tempo`). A soma dá 11.451.999 pessoas, a população oficial do município no Censo 2022.
 
+### OpenStreetMap (rede viária)
+
+| # | Notebook | Widgets |
+|---|---|---|
+| 1 | `01_osm_roads_landing` | `url` (extrato Sudeste da Geofabrik); `camada` (`gis_osm_roads_free_1`); `forcar`: `nao`/`sim` |
+| 2 | `02_osm_roads_bronze` | `envelope` (`-46.84,-24.02,-46.35,-23.34`); `recarregar`: `nao`/`sim` |
+| 3 | `03_osm_roads_silver` | (sem widgets: recria a Silver a partir da Bronze) |
+| 3 | `03_osm_silver_quality` (pasta `quality/`) | (sem widgets) |
+| 4 | `04_dim_osm_road_class` | (sem widgets) |
+| 5 | `05_dim_osm_roads` | (sem widgets) |
+| 5 | `05_osm_gold_quality` (pasta `quality/`) | (sem widgets) |
+
+- **Licença:** dados © colaboradores do OpenStreetMap, sob a [Open Database License (ODbL 1.0)](https://www.openstreetmap.org/copyright). Todo mapa, painel ou relatório feito com estas tabelas precisa trazer a atribuição "© OpenStreetMap contributors". Se a base derivada for distribuída, ela também fica sob a ODbL. A atribuição está nos comentários das tabelas e no manifesto da landing.
+- **Fonte:** extrato *free shapefile* da região Sudeste da Geofabrik (cerca de 2,2 GB, atualizado todo dia). A landing lê do zip publicado só a camada de vias (`gis_osm_roads_free_1`, cerca de 530 MB comprimidos) e grava, sem alteração, um zip por extrato. Sem alteração na fonte, registra `SEM_DADOS`.
+- **Recorte:** a Bronze carrega as vias cujo envelope cruza o envelope do município (calculado a partir dos setores do IBGE, com margem de 0,01°). Entram as vias do município e as das bordas dos municípios vizinhos, cerca de 292 mil vias no extrato de novembro de 2026. O extrato completo continua no volume.
+- **Silver:** sentido (`oneway`), velocidade máxima, ponte e túnel tipados. A geometria do OSM vem em WGS84 (EPSG 4326), que é tratado como igual ao SIRGAS 2000 (a diferença é menor que 1 m), e é gravada como EPSG 4674. O comprimento é calculado em UTM 23S.
+- **Gold:** `dim_osm_road_class` (classes da Geofabrik com descrição em português, grupo, hierarquia viária e se a via é de veículos) e `dim_osm_roads` (dimensão espacial, uma via por linha, com nome, sentido, velocidade, ponte, túnel, comprimento, centroide, envelope e geometria). As duas têm o membro `-1`. A cada extrato novo, as vias que mudaram são atualizadas e as que saíram do OSM são removidas.
+
 ## Jobs e workflows
 
 Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YAML dos jobs do Databricks (`resources.jobs`). Separar por fonte faz com que uma falha numa API não trave as outras.
@@ -315,6 +350,7 @@ Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YA
 | `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | ativo |
 | `jobs/chuvasegura_sgb.job.yml` | `ChuvaSegura - SGB` | dia 1 de cada mês às 06:00 | ativo |
 | `jobs/chuvasegura_ibge.job.yml` | `ChuvaSegura - IBGE` | dia 1 de cada mês às 06:30 | ativo |
+| `jobs/chuvasegura_osm.job.yml` | `ChuvaSegura - OSM` | toda segunda-feira às 05:00 | ativo |
 
 ```mermaid
 flowchart LR
@@ -372,6 +408,12 @@ flowchart LR
     IT[00_dim_tempo] --> I5
     I5 --> IQ2{{05_ibge_gold_quality}}
   end
+  subgraph osm["ChuvaSegura - OSM"]
+    O1[01_osm_roads_landing] --> O2[02_osm_roads_bronze] --> O3[03_osm_roads_silver]
+    O3 --> OQ1{{03_osm_silver_quality}}
+    OQ1 --> O4[04_dim_osm_road_class] --> O5[05_dim_osm_roads]
+    O5 --> OQ2{{05_osm_gold_quality}}
+  end
 ```
 
 Todos os jobs:
@@ -403,6 +445,7 @@ Cada origem tem a sua tabela de log, todas no mesmo formato, definido em `src/co
 - `fiap_analytics.bronze.geosampa_ingestion_log`
 - `fiap_analytics.bronze.sgb_ingestion_log`
 - `fiap_analytics.bronze.ibge_ingestion_log`
+- `fiap_analytics.bronze.osm_ingestion_log`
 
 Colunas: `batch_id, fonte, etapa, janela, status, registros, paginas, duplicados, arquivo, sha256, duracao_s, iniciado_em, finalizado_em, mensagem`.
 
@@ -437,7 +480,7 @@ As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como 
   - `AVISO`: só registra.
 - **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
 - **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
-- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log`, `fiap_analytics.bronze.sgb_data_quality_log` e `fiap_analytics.bronze.ibge_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log`, `fiap_analytics.bronze.sgb_data_quality_log`, `fiap_analytics.bronze.ibge_data_quality_log` e `fiap_analytics.bronze.osm_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
 
 Regras do GeoSampa:
 
@@ -474,6 +517,13 @@ Regras do IBGE:
 | Silver | tabela não vazia; mesmos setores da Bronze; código do setor preenchido, único, com 15 dígitos e do município 3550308; os 96 distritos presentes; tipo e situação descritos; pessoas preenchidas; contagens não negativas; domicílios = particulares + coletivos; ocupados até os particulares; proporção de imputados entre 0 e 1; geometria de origem em EPSG 4674 e preenchida; área maior que zero e igual à do IBGE (0,1%); setores dentro da área de São Paulo; soma das áreas igual à do município (1%) | população diferente da do Censo 2022 (11.451.999) |
 | Gold | fato não vazia, com os mesmos setores, pessoas e domicílios da Silver; setor único por data; chaves existentes na `dim_tempo` e na dimensão de setores, sem setor `-1`; contagens não negativas; densidade coerente; dimensão não vazia, com chaves únicas, membro `-1` e os mesmos setores da Silver; geometria preenchida; centroide dentro do envelope | — |
 
+Regras do OpenStreetMap:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | tabela não vazia; mesmas vias da Bronze; pelo menos 15 mil km de vias de veículos no recorte; `osm_id` preenchido e único; classe preenchida; geometria de origem em EPSG 4326, preenchida e linear; comprimento maior que zero; vias dentro da área de São Paulo; sentido `B`, `F` ou `T` | classe fora do esquema da Geofabrik; vias com mais de 50 km; velocidade fora de 5 a 130 km/h; mais de 20% das vias de veículos sem nome |
+| Gold | dimensões não vazias; chaves únicas e membro `-1`; vias e extensão iguais às da Silver em cada classe; classe existente na dimensão; geometria preenchida; centroide dentro do envelope | vias com classe `-1` |
+
 Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
 
 ```sql
@@ -500,12 +550,15 @@ ORDER BY executado_em DESC;
 | bronze | `sgb_data_quality_log` | Resultados das regras de qualidade do SGB |
 | bronze | `ibge_census_tracts` | Setores censitários do Censo 2022 no município, atributos em texto e geometria em WKB (EPSG 4674) |
 | bronze | `ibge_data_quality_log` | Resultados das regras de qualidade do IBGE |
+| bronze | `osm_roads` | Vias do OpenStreetMap no recorte do município, atributos em texto e geometria em WKB (EPSG 4326) |
+| bronze | `osm_data_quality_log` | Resultados das regras de qualidade do OpenStreetMap |
 | silver | `sibh_stations` | Sensores de chuva e nível do SIBH na capital, uma linha por sensor, tipados |
 | silver | `sibh_measurements` | Medições de chuva e nível tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `cemaden_stations` | Estações do CEMADEN no município, uma linha por estação, tipadas |
 | silver | `cemaden_rainfall_readings` | Leituras de chuva tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `sgb_susceptibility_areas` | Áreas da carta de suscetibilidade, com camada e classe padronizadas, geometria em EPSG 4674, área, centroide e envelope |
 | silver | `ibge_census_tracts` | Setores censitários tipados, com situação, tipo, distrito, favela, pessoas, domicílios, densidade, geometria, centroide e envelope |
+| silver | `osm_roads` | Vias tipadas, com classe, nome, sentido, velocidade, ponte, túnel, geometria, comprimento, centroide e envelope |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_cemaden_stations` | Dimensão de estações do CEMADEN, com o membro `-1` (não informado) |
@@ -520,6 +573,8 @@ ORDER BY executado_em DESC;
 | gold | `dim_sgb_susceptibility_areas` | Dimensão espacial das áreas da carta do SGB, uma linha por polígono, com classe, área, centroide, envelope e geometria |
 | gold | `dim_ibge_census_tracts` | Dimensão espacial dos setores censitários do Censo 2022, com o membro `-1` |
 | gold | `fact_ibge_census_tract_population` | Fato de pessoas e domicílios por setor censitário na data de referência do Censo 2022 |
+| gold | `dim_osm_road_class` | Dimensão de classes de via do OpenStreetMap, com hierarquia viária, com o membro `-1` |
+| gold | `dim_osm_roads` | Dimensão espacial das vias do OpenStreetMap, uma via por linha, com o membro `-1` |
 
 ## Desenvolvimento
 
@@ -537,3 +592,4 @@ ORDER BY executado_em DESC;
 - **GeoSampa:** Prefeitura de São Paulo. Subprefeituras conforme o Anexo IX (ata 41/14).
 - **SGB:** Serviço Geológico do Brasil (SGB/CPRM) e Instituto de Pesquisas Tecnológicas (IPT). *Carta de suscetibilidade a movimentos gravitacionais de massa e inundações: município de São Paulo - SP*, 2015, escala 1:75.000. Disponível no RIGEO.
 - **IBGE:** Instituto Brasileiro de Geografia e Estatística. Censo Demográfico 2022: Agregados por Setores Censitários (resultados do universo) e malha de setores censitários.
+- **OpenStreetMap:** © colaboradores do OpenStreetMap. Dados disponíveis sob a Open Database License (ODbL 1.0), https://www.openstreetmap.org/copyright. Extrato da Geofabrik GmbH (download.geofabrik.de).
