@@ -166,7 +166,7 @@ O cadastro de estações e as leituras de chuva seguem em paralelo até a Silver
 |---|---|---|
 | 1 | `01_cemaden_stations_landing` | `codibge` (3550308), `tipoestacao` (vazio = todos), `formato` (JSON) |
 | 2 | `02_cemaden_stations_bronze` | `snapshot_date`: `pending` (padrão), `latest`, `all` ou `AAAA-MM-DD` |
-| 1 | `01_cemaden_rainfall_readings_landing` | `modo`: `backfill` ou `incremental`; `mes_inicio` (201401); `mes_fim` (vazio = último mês fechado); `forcar_reprocesso`: `nao`/`sim` |
+| 1 | `01_cemaden_rainfall_readings_landing` | `modo`: `backfill` ou `incremental`; `mes_inicio` (202001, mínimo); `mes_fim` (vazio = último mês fechado); `forcar_reprocesso`: `nao`/`sim` |
 | 2 | `02_cemaden_rainfall_readings_bronze` | (sem widgets: carrega os meses pendentes segundo o log) |
 | 3 | `03_cemaden_stations_silver` | (sem widgets: recria a Silver a partir de todos os snapshots) |
 | 3 | `03_cemaden_rainfall_readings_silver` | `window`: `pending` (padrão: meses recarregados na Bronze), `all` ou `AAAAMM` |
@@ -175,7 +175,8 @@ O cadastro de estações e as leituras de chuva seguem em paralelo até a Silver
 | 5 | `05_fact_cemaden_rainfall_hourly` | (sem widgets: recarrega os meses novos ou alterados) |
 | 5 | `05_cemaden_gold_quality` (pasta `quality/`) | (sem widgets) |
 
-- A PED aceita 12 chamadas por minuto, então o primeiro backfill desde 2014 leva horas. Se parar no meio, basta rodar de novo: o notebook continua de onde parou.
+- **Período:** só leituras a partir de janeiro de 2020, o mesmo início do SIBH. O histórico desde 2014 deixava a Bronze com cerca de 17 milhões de linhas. A landing não baixa meses anteriores (um `mes_inicio` menor é trocado por 202001), e a Bronze remove os que já estavam na tabela. A Silver e a Gold acompanham sozinhas, porque removem os meses que saíram da camada anterior. Os arquivos brutos antigos continuam no volume e podem ser apagados à mão (`ano=2014` a `ano=2019`).
+- A PED aceita 12 chamadas por minuto, então o primeiro backfill desde 2020 leva algumas horas. Se parar no meio, basta rodar de novo: o notebook continua de onde parou.
 - Os cadastros (`*_stations_*`) são snapshots diários: rodar no mesmo dia substitui o snapshot do dia.
 - **Silver das estações:** uma linha por estação, com a versão do snapshot mais recente em que ela aparece. Estações que saíram do cadastro continuam na tabela (`fl_no_cadastro_atual = false`), para que as leituras antigas tenham estação.
 - **Silver das leituras:** `datahora` da fonte está em UTC e vira `dt_hr_leitura_utc`; `dt_leitura`, `nr_hora` e `cod_dim_data` são calculados no fuso de São Paulo. `valor` vira `nr_chuva_mm` (chuva em mm no intervalo da leitura). Leituras duplicadas (mesma estação, sensor e data e hora) ficam uma só, a da carga mais recente.
@@ -355,7 +356,7 @@ Regras do CEMADEN:
 
 | Etapa | ERRO (para o job) | AVISO (só registra) |
 |---|---|---|
-| Silver | estações: tabela não vazia, código único, latitude e longitude preenchidas e dentro da área de São Paulo; leituras: tabela não vazia, uma linha por chave distinta da Bronze, estação, sensor e data e hora preenchidos, data entre 2010 e agora, chuva não negativa | mais de 1% das leituras com data e hora fora do mês pedido à API (confere a premissa de UTC); mais de 1% sem valor; leituras acima de 50 mm; mais de 1% de leituras de estações fora do cadastro |
+| Silver | estações: tabela não vazia, código único, latitude e longitude preenchidas e dentro da área de São Paulo; leituras: tabela não vazia, uma linha por chave distinta da Bronze, estação, sensor e data e hora preenchidos, data entre 2020 e agora, chuva não negativa | mais de 1% das leituras com data e hora fora do mês pedido à API (confere a premissa de UTC); mais de 1% sem valor; leituras acima de 50 mm; mais de 1% de leituras de estações fora do cadastro |
 | Gold | fato não vazia; uma linha por estação, sensor, dia e hora; leituras e chuva iguais às da Silver em cada mês; chaves existentes na `dim_tempo` e na dimensão de estações; chuva da hora não negativa; chaves únicas e membro `-1` na dimensão | mais de 1% das horas com estação `-1`; horas acima de 120 mm |
 
 Regras do SIBH:
@@ -379,7 +380,7 @@ ORDER BY executado_em DESC;
 | Camada | Tabela | Conteúdo |
 |---|---|---|
 | bronze | `cemaden_stations` | Snapshots diários do cadastro de estações do CEMADEN |
-| bronze | `cemaden_rainfall_readings` | Leituras de chuva do CEMADEN, uma fatia por mês (`_window`) |
+| bronze | `cemaden_rainfall_readings` | Leituras de chuva do CEMADEN a partir de 2020, uma fatia por mês (`_window`) |
 | bronze | `sibh_stations` | Snapshots diários do cadastro de estações do SIBH (estado inteiro) |
 | bronze | `sibh_measurements` | Medições de chuva e nível do SIBH na capital, uma fatia por mês |
 | bronze | `geosampa_history_flooding_events` | Ocorrências do GeoSampa, com a geometria em WKB |

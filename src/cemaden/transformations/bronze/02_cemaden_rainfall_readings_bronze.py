@@ -10,6 +10,7 @@
 # MAGIC 2. Tudo em string. Campos que a API passar a mandar vão para `_rescued_data`.
 # MAGIC 3. Idempotência por mês: a fatia `_window = 'AAAAMM'` é substituída com `replaceWhere`. Tabela particionada por `_window_year`.
 # MAGIC 4. Conferência: linhas lidas precisam bater com as registradas na landing.
+# MAGIC 5. Período a partir de 2020 (`ANO_MINIMO`): meses anteriores não são carregados, e os que já estavam na tabela são removidos no fim da carga. A remoção apaga partições inteiras (`_window_year`). Depois dela, a Silver e a Gold tiram esses meses sozinhas, porque removem os meses que saíram da camada anterior. Os arquivos brutos continuam no volume.
 
 # COMMAND ----------
 
@@ -26,6 +27,7 @@ CATALOGO, SCHEMA = "fiap_analytics", "bronze"
 BRONZE_TABLE = f"{CATALOGO}.{SCHEMA}.cemaden_rainfall_readings"
 ENDPOINT = "/pcds/pcds-dados-pg"
 BATCH_ID = str(uuid.uuid4())
+ANO_MINIMO = 2020  # o projeto usa as leituras de 2020 em diante (o histórico desde 2014 tinha ~17 milhões de linhas)
 
 SCHEMA_ORIGEM = T.StructType([
     T.StructField(c, T.StringType())
@@ -56,6 +58,7 @@ WITH landing AS (
          max(finalizado_em)               AS landing_em
   FROM {LOG_TABLE}
   WHERE fonte = '{FONTE}' AND etapa = 'landing' AND status IN ('SUCESSO', 'PARCIAL') AND registros > 0
+    AND janela >= '{ANO_MINIMO}01'
   GROUP BY janela
 ),
 bronze AS (
@@ -114,6 +117,20 @@ for p in pendentes:
 
 if falhas:
     raise RuntimeError(f"Meses com falha na Bronze: {falhas}")
+
+# COMMAND ----------
+
+# Remove da tabela os meses anteriores a ANO_MINIMO (carregados antes do corte). Na primeira execução depois
+# do corte apaga as partições antigas; nas seguintes não encontra nada. O espaço em disco é liberado pelo
+# VACUUM (automático com a otimização preditiva do Unity Catalog).
+if spark.catalog.tableExists(BRONZE_TABLE):
+    iniciado_em = datetime.now(timezone.utc)
+    antigas = spark.table(BRONZE_TABLE).filter(F.col("_window_year") < ANO_MINIMO).count()
+    if antigas:
+        spark.sql(f"DELETE FROM {BRONZE_TABLE} WHERE _window_year < {ANO_MINIMO}")
+        registrar(f"<{ANO_MINIMO}01", "SUCESSO", iniciado_em, registros=antigas,
+                  mensagem=f"removidas {antigas} leituras anteriores a {ANO_MINIMO} (corte do período do projeto)")
+        print(f"Removidas {antigas} leituras anteriores a {ANO_MINIMO}")
 
 display(spark.sql(f"""
 SELECT _window, count(*) AS linhas, count(DISTINCT codestacao) AS estacoes,
