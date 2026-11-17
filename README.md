@@ -8,6 +8,7 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 | **SIBH / SP Águas** | Cadastro de estações e medições de chuva e nível das demais instituições (SP Águas, SAISP, SABESP…) | API pública |
 | **GeoSampa** | Ocorrências de alagamento, deslizamento, inundação e queda de árvore, além das subprefeituras | Arquivos baixados e enviados ao volume |
 | **SGB / CPRM** | Carta de suscetibilidade a movimentos de massa e inundações do município (IPT/CPRM, 2015): áreas de suscetibilidade, bacias contribuintes e padrões de relevo | Download público (RIGEO) |
+| **IBGE** | Censo 2022: malha de setores censitários com pessoas e domicílios, para estimar a população exposta | Download público (FTP do IBGE) |
 
 ## Arquitetura
 
@@ -20,7 +21,7 @@ flowchart LR
     SIBH[SIBH api/v2]
   end
   GPKG[Arquivos GeoSampa]
-  PUB[Downloads públicos<br/>SGB]
+  PUB[Downloads públicos<br/>SGB, IBGE]
   subgraph bronze
     VOL[(Volumes: arquivos brutos<br/>JSON gzip / GPKG / shapefile)]
     BT[Tabelas Bronze<br/>tudo em string]
@@ -55,6 +56,7 @@ Situação atual:
 | SIBH | ✅ | ✅ | ✅ | ✅ |
 | GeoSampa | ✅ | ✅ | ✅ | ✅ |
 | SGB | ✅ | ✅ | ✅ | ✅ |
+| IBGE | ✅ | ✅ | ✅ | ✅ |
 
 ## Estrutura do repositório
 
@@ -64,6 +66,7 @@ O número no início de cada arquivo indica a ordem de execução dentro da font
 jobs/                                             # definição dos jobs do Databricks (YAML)
 ├── chuvasegura_cemaden.job.yml
 ├── chuvasegura_geosampa.job.yml
+├── chuvasegura_ibge.job.yml
 ├── chuvasegura_sgb.job.yml
 └── chuvasegura_sibh.job.yml
 src/
@@ -125,20 +128,34 @@ src/
 │           ├── 03_dim_geosampa_subprefecture_area.sql
 │           ├── 03_dim_geosampa_type_flooding_events.sql
 │           └── 04_fact_geosampa_flooding_events.sql
-└── sgb/
+├── sgb/
+│   ├── ingestion/
+│   │   └── 01_sgb_susceptibility_landing.py
+│   ├── quality/
+│   │   ├── 03_sgb_silver_quality.py
+│   │   └── 05_sgb_gold_quality.py
+│   └── transformations/
+│       ├── bronze/
+│       │   └── 02_sgb_susceptibility_bronze.py
+│       ├── silver/
+│       │   └── 03_sgb_susceptibility_areas_silver.py
+│       └── gold/
+│           ├── 04_dim_sgb_susceptibility_class.sql
+│           └── 05_dim_sgb_susceptibility_areas.sql
+└── ibge/
     ├── ingestion/
-    │   └── 01_sgb_susceptibility_landing.py
+    │   └── 01_ibge_census_tracts_landing.py
     ├── quality/
-    │   ├── 03_sgb_silver_quality.py
-    │   └── 05_sgb_gold_quality.py
+    │   ├── 03_ibge_silver_quality.py
+    │   └── 05_ibge_gold_quality.py
     └── transformations/
         ├── bronze/
-        │   └── 02_sgb_susceptibility_bronze.py
+        │   └── 02_ibge_census_tracts_bronze.py
         ├── silver/
-        │   └── 03_sgb_susceptibility_areas_silver.py
+        │   └── 03_ibge_census_tracts_silver.py
         └── gold/
-            ├── 04_dim_sgb_susceptibility_class.sql
-            └── 05_dim_sgb_susceptibility_areas.sql
+            ├── 04_dim_ibge_census_tracts.sql
+            └── 05_fact_ibge_census_tract_population.sql
 ```
 
 Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` começando com `Databricks notebook source`). O Databricks os abre como notebooks normais, com as células separadas.
@@ -269,6 +286,24 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - **Áreas publicadas:** no movimento de massa, a soma dos polígonos de cada classe bate com o quadro-síntese (100,1, 231,2 e 1.196,2 km²). Na inundação, a soma (69,3, 88,0 e 138,8 km²) passa da área do quadro (52,0, 66,2 e 113,1 km²). A diferença está no próprio arquivo, por isso a qualidade compara com a `Shape_Area`.
 - **Modelo da Gold (SGB):** `dim_sgb_susceptibility_class` (camada e classe, com grau, declividade, características e área do quadro-síntese) e `dim_sgb_susceptibility_areas` (dimensão espacial, uma linha por polígono, com a classe, a área, o centroide, o envelope e a geometria). As duas têm o membro `-1`. As áreas são a referência para o cruzamento com as ocorrências do GeoSampa: uma ocorrência pode cair em mais de uma área da mesma camada, e nesse caso vale o maior grau.
 
+### IBGE (Censo 2022 por setor censitário)
+
+| # | Notebook | Widgets |
+|---|---|---|
+| 1 | `01_ibge_census_tracts_landing` | `url` (malha com atributos de SP); `cod_ibge` (3550308, conferência); `forcar`: `nao`/`sim` |
+| 2 | `02_ibge_census_tracts_bronze` | `cod_ibge` (3550308); `recarregar`: `nao`/`sim` |
+| 3 | `03_ibge_census_tracts_silver` | (sem widgets: recria a Silver a partir da Bronze) |
+| 3 | `03_ibge_silver_quality` (pasta `quality/`) | (sem widgets) |
+| 4 | `04_dim_ibge_census_tracts` | (sem widgets) |
+| 5 | `05_fact_ibge_census_tract_population` | (sem widgets) |
+| 5 | `05_ibge_gold_quality` (pasta `quality/`) | (sem widgets) |
+
+- **Fonte:** `SP_setores_CD2022.gpkg` da [malha com atributos](https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios/malha_com_atributos/setores/gpkg/UF/SP/) dos *Agregados por Setores Censitários* do Censo 2022. Um GeoPackage do estado (cerca de 180 MB) traz o polígono de cada setor e as variáveis do universo V0001 a V0007 (pessoas, domicílios, domicílios particulares e coletivos, média de moradores, proporção de domicílios imputados e domicílios ocupados).
+- **Recorte:** a landing guarda o arquivo do estado inteiro. A Bronze carrega só os 27.301 setores do município, porque o arquivo do estado tem mais de 100 mil setores.
+- **Sem alteração na fonte**, a landing não baixa nada e registra `SEM_DADOS`, e a Bronze não recarrega. A conferência mensal existe porque o IBGE já republicou arquivos do Censo com correções.
+- **Silver:** códigos `.` viram nulo; a situação detalhada e o tipo do setor ganham a descrição do dicionário de dados do IBGE; `fl_favela` marca os 3.875 setores de favelas e comunidades urbanas. A geometria já vem em SIRGAS 2000 geográfico (EPSG 4674) e é mantida. A área calculada em UTM fica a até 0,03% da área publicada pelo IBGE, e a densidade usa a área do IBGE.
+- **Gold:** `dim_ibge_census_tracts` (dimensão espacial, um setor por linha, com distrito, favela, área, centroide, envelope e geometria) e `fact_ibge_census_tract_population` (pessoas e domicílios por setor na data de referência do Censo, 31/07/2022, chave `20220731` da `dim_tempo`). A soma dá 11.451.999 pessoas, a população oficial do município no Censo 2022.
+
 ## Jobs e workflows
 
 Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YAML dos jobs do Databricks (`resources.jobs`). Separar por fonte faz com que uma falha numa API não trave as outras.
@@ -279,6 +314,7 @@ Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YA
 | `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | ativo |
 | `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | ativo |
 | `jobs/chuvasegura_sgb.job.yml` | `ChuvaSegura - SGB` | dia 1 de cada mês às 06:00 | ativo |
+| `jobs/chuvasegura_ibge.job.yml` | `ChuvaSegura - IBGE` | dia 1 de cada mês às 06:30 | ativo |
 
 ```mermaid
 flowchart LR
@@ -328,6 +364,14 @@ flowchart LR
     BQ1 --> B4[04_dim_sgb_susceptibility_class] --> B5[05_dim_sgb_susceptibility_areas]
     B5 --> BQ2{{05_sgb_gold_quality}}
   end
+  subgraph ibge["ChuvaSegura - IBGE"]
+    I1[01_ibge_census_tracts_landing] --> I2[02_ibge_census_tracts_bronze] --> I3[03_ibge_census_tracts_silver]
+    I3 --> IQ1{{03_ibge_silver_quality}}
+    IQ1 --> I4[04_dim_ibge_census_tracts] --> I5[05_fact_ibge_census_tract_population]
+    IQ1 --> I5
+    IT[00_dim_tempo] --> I5
+    I5 --> IQ2{{05_ibge_gold_quality}}
+  end
 ```
 
 Todos os jobs:
@@ -358,6 +402,7 @@ Cada origem tem a sua tabela de log, todas no mesmo formato, definido em `src/co
 - `fiap_analytics.bronze.sibh_ingestion_log`
 - `fiap_analytics.bronze.geosampa_ingestion_log`
 - `fiap_analytics.bronze.sgb_ingestion_log`
+- `fiap_analytics.bronze.ibge_ingestion_log`
 
 Colunas: `batch_id, fonte, etapa, janela, status, registros, paginas, duplicados, arquivo, sha256, duracao_s, iniciado_em, finalizado_em, mensagem`.
 
@@ -392,7 +437,7 @@ As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como 
   - `AVISO`: só registra.
 - **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
 - **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
-- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log` e `fiap_analytics.bronze.sgb_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log`, `fiap_analytics.bronze.sgb_data_quality_log` e `fiap_analytics.bronze.ibge_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
 
 Regras do GeoSampa:
 
@@ -422,6 +467,13 @@ Regras do SGB:
 | Silver | tabela não vazia; mesmas feições da Bronze; as seis camadas presentes; feição única na camada; classe preenchida e, nas camadas graduadas, Alta, Média ou Baixa; geometria de origem em EPSG 31983 e preenchida; área maior que zero e igual à `Shape_Area` da fonte (0,01%); feições dentro da área de São Paulo (menos as bacias contribuintes); movimento de massa e relevo cobrindo a área do município (2%) | camada desconhecida; área de cada classe de movimento de massa diferente do quadro-síntese (1%) |
 | Gold | dimensões não vazias; chaves únicas e membro `-1`; grau coerente com a classe; áreas e feições iguais às da Silver em cada camada; classe existente na dimensão de classes e nenhuma área com classe `-1`; geometria preenchida; centroide dentro do envelope | classe graduada sem características do quadro-síntese |
 
+Regras do IBGE:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | tabela não vazia; mesmos setores da Bronze; código do setor preenchido, único, com 15 dígitos e do município 3550308; os 96 distritos presentes; tipo e situação descritos; pessoas preenchidas; contagens não negativas; domicílios = particulares + coletivos; ocupados até os particulares; proporção de imputados entre 0 e 1; geometria de origem em EPSG 4674 e preenchida; área maior que zero e igual à do IBGE (0,1%); setores dentro da área de São Paulo; soma das áreas igual à do município (1%) | população diferente da do Censo 2022 (11.451.999) |
+| Gold | fato não vazia, com os mesmos setores, pessoas e domicílios da Silver; setor único por data; chaves existentes na `dim_tempo` e na dimensão de setores, sem setor `-1`; contagens não negativas; densidade coerente; dimensão não vazia, com chaves únicas, membro `-1` e os mesmos setores da Silver; geometria preenchida; centroide dentro do envelope | — |
+
 Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
 
 ```sql
@@ -446,11 +498,14 @@ ORDER BY executado_em DESC;
 | bronze | `sibh_data_quality_log` | Resultados das regras de qualidade do SIBH |
 | bronze | `sgb_susceptibility_areas` | Feições da carta de suscetibilidade do SGB, uma linha por feição de cada camada, com a geometria em WKB (EPSG 31983) |
 | bronze | `sgb_data_quality_log` | Resultados das regras de qualidade do SGB |
+| bronze | `ibge_census_tracts` | Setores censitários do Censo 2022 no município, atributos em texto e geometria em WKB (EPSG 4674) |
+| bronze | `ibge_data_quality_log` | Resultados das regras de qualidade do IBGE |
 | silver | `sibh_stations` | Sensores de chuva e nível do SIBH na capital, uma linha por sensor, tipados |
 | silver | `sibh_measurements` | Medições de chuva e nível tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `cemaden_stations` | Estações do CEMADEN no município, uma linha por estação, tipadas |
 | silver | `cemaden_rainfall_readings` | Leituras de chuva tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `sgb_susceptibility_areas` | Áreas da carta de suscetibilidade, com camada e classe padronizadas, geometria em EPSG 4674, área, centroide e envelope |
+| silver | `ibge_census_tracts` | Setores censitários tipados, com situação, tipo, distrito, favela, pessoas, domicílios, densidade, geometria, centroide e envelope |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_cemaden_stations` | Dimensão de estações do CEMADEN, com o membro `-1` (não informado) |
@@ -463,6 +518,8 @@ ORDER BY executado_em DESC;
 | gold | `fact_geosampa_flooding_events` | Fato de ocorrências (uma linha por ocorrência) por data, tipo e subprefeitura, com latitude e longitude |
 | gold | `dim_sgb_susceptibility_class` | Dimensão de classes da carta do SGB (camada e classe, com grau, declividade e características do quadro-síntese), com o membro `-1` |
 | gold | `dim_sgb_susceptibility_areas` | Dimensão espacial das áreas da carta do SGB, uma linha por polígono, com classe, área, centroide, envelope e geometria |
+| gold | `dim_ibge_census_tracts` | Dimensão espacial dos setores censitários do Censo 2022, com o membro `-1` |
+| gold | `fact_ibge_census_tract_population` | Fato de pessoas e domicílios por setor censitário na data de referência do Censo 2022 |
 
 ## Desenvolvimento
 
@@ -479,3 +536,4 @@ ORDER BY executado_em DESC;
 - **SIBH:** Sistema de Informações Hidrológicas, Agência de Águas do Estado de São Paulo (SP Águas).
 - **GeoSampa:** Prefeitura de São Paulo. Subprefeituras conforme o Anexo IX (ata 41/14).
 - **SGB:** Serviço Geológico do Brasil (SGB/CPRM) e Instituto de Pesquisas Tecnológicas (IPT). *Carta de suscetibilidade a movimentos gravitacionais de massa e inundações: município de São Paulo - SP*, 2015, escala 1:75.000. Disponível no RIGEO.
+- **IBGE:** Instituto Brasileiro de Geografia e Estatística. Censo Demográfico 2022: Agregados por Setores Censitários (resultados do universo) e malha de setores censitários.
