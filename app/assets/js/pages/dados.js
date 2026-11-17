@@ -34,7 +34,7 @@ export default {
       this.render(root, { params: new URLSearchParams() }).then(() => root.querySelector(`#tab-${tab}`).focus());
     });
     const panel = root.querySelector("#panel");
-    if (tab === "fontes") panel.innerHTML = fontes();
+    if (tab === "fontes") panel.innerHTML = fontes(m);
     if (tab === "metodologia") panel.innerHTML = `<div class="grid grid--2">${METODOLOGIA.map((x) => `<article class="card"><div class="card__body"><h3 style="margin-bottom:8px">${esc(x.t)}</h3><p style="margin:0;color:var(--text-2)">${esc(x.d)}</p></div></article>`).join("")}</div>`;
     if (tab === "licencas") panel.innerHTML = licencas();
     if (tab === "linhagem") panel.innerHTML = linhagem(m);
@@ -48,10 +48,25 @@ export default {
   },
 };
 
-function fontes() {
-  return `<div class="stack">${FONTES.map((f) => `<article class="card source" id="src-${f.id}">
+function fontes(manifest) {
+  const publishedSources = new Set();
+  const tableSources = {
+    geosampa: ["geosampa_"], cemaden: ["cemaden_"], sibh: ["sibh_"],
+    sgb: ["sgb_"], ibge: ["ibge_"], osm: ["osm_", "openstreetmap"], inmet: ["inmet_"],
+  };
+  for (const d of manifest?.datasets || []) {
+    const source = d.fonte?.id || d.fonte;
+    if (typeof source === "string" && source !== "multiplas") publishedSources.add(source.toLowerCase());
+    const tables = (d.tabelas_origem || []).map((t) => t.toLowerCase());
+    for (const [id, prefixes] of Object.entries(tableSources)) {
+      if (tables.some((t) => prefixes.some((p) => t.includes(p)))) publishedSources.add(id);
+    }
+  }
+  return `<div class="stack">${FONTES.map((f) => {
+    const published = publishedSources.has(f.id.toLowerCase());
+    return `<article class="card source" id="src-${f.id}">
     <div class="card__head"><div><h3>${esc(f.nome)}</h3><p>${esc(f.uso)}</p></div>
-      <div class="pill-list">${badge("neutral", `Prioridade ${f.prioridade}`)} ${f.publicado ? badge("ok", "Publicado na web", "check") : badge("neutral", "Só no pipeline", "database")}</div></div>
+      <div class="pill-list">${badge("neutral", `Prioridade ${f.prioridade}`)} ${published ? badge("ok", "Publicado na web", "check") : badge("neutral", "Só no pipeline", "database")}</div></div>
     <div class="card__body">
       <dl class="dl">
         <dt>Acesso</dt><dd>${esc(f.acesso)}</dd>
@@ -62,7 +77,8 @@ function fontes() {
         <dt>Limitações</dt><dd><ul class="plain">${f.limitacoes.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></dd>
         <dt>Site</dt><dd><a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.url)} ${icon("external")}</a></dd>
       </dl>
-    </div></article>`).join("")}</div>`;
+    </div></article>`;
+  }).join("")}</div>`;
 }
 
 function conjunto(d, r, alvo) {
@@ -102,7 +118,7 @@ function linhagem(m) {
         { label: "Fonte", fmt: (r) => `<strong>${esc(r.fonte)}</strong>` },
         { label: "Tabelas (Bronze → Silver → Gold)", fmt: (r) => r.tabelas.map((t) => `<code>${esc(t)}</code>`).join(` ${icon("arrowRight", "inline-ic")} `) },
         { label: "Última execução", fmt: (r) => esc(fmtDateTime(r.processado_em)) },
-        { label: "Qualidade", fmt: (r) => (r.qualidade === "simulado" ? badge("demo", "Simulada", "flask") : r.qualidade === "aprovado" ? badge("ok", "Aprovada", "check") : badge("error", "Reprovada", "alert")) },
+        { label: "Qualidade", fmt: (r) => (r.qualidade === "simulado" ? badge("demo", "Simulada", "flask") : r.qualidade === "aprovado" ? badge("ok", "Aprovada", "check") : r.qualidade === "aprovado_com_avisos" ? badge("stale", "Aprovada com avisos", "info") : r.qualidade === "reprovado" ? badge("error", "Reprovada", "alert") : badge("neutral", "Não verificada")) },
         { label: "Na web", fmt: (r) => (r.publicado_na_web ? badge("ok", "Publicado", "check") : badge("neutral", "Não publicado")) },
       ],
       m.linhagem,

@@ -42,12 +42,15 @@ export default {
         label: "Ocorrências registradas", ic: "pin", value: fmtInt(occ.length),
         ctx: `${esc(per.texto)} · registros históricos do GeoSampa${delta !== null ? `<br>${delta >= 0 ? "+" : ""}${fmtPct(delta, 0)} vs. período anterior de mesma duração (${fmtInt(prev.length)})` : ""}${per.fim > fimOc ? `<br>Registros publicados até ${esc(fimOc.split("-").reverse().join("/"))}` : ""}`,
       }));
-      const comGrau = occ.filter((o) => o.grau === 3).length;
-      const areaAlta = susc.status === "ok" ? susc.meta.area_uniao_km2["3"] / susc.meta.area_municipio_km2 : null;
-      kpis.push(kpiCard({
-        label: "Em área de suscetibilidade alta", ic: "terrain", value: occ.length ? fmtPct(comGrau / occ.length, 0) : "—",
-        ctx: `${fmtInt(comGrau)} ocorrências dentro de polígonos de inundação classe Alta${areaAlta !== null ? `, que cobrem ${fmtPct(areaAlta, 1)} do município` : ""}. Associação espacial, não causalidade.`,
-      }));
+      const cruzadas = occ.filter((o) => Number.isInteger(o.grau));
+      if (susc.status === "ok" && cruzadas.length) {
+        const altas = cruzadas.filter((o) => o.grau === 3).length;
+        const areaAlta = susc.meta.area_uniao_km2["3"] / susc.meta.area_municipio_km2;
+        kpis.push(kpiCard({
+          label: "Em área de suscetibilidade alta", ic: "terrain", value: fmtPct(altas / cruzadas.length, 0),
+          ctx: `${fmtInt(altas)} de ${fmtInt(cruzadas.length)} ocorrências cruzadas dentro de polígonos de inundação classe Alta${areaAlta !== null ? `, que cobrem ${fmtPct(areaAlta, 1)} do município` : ""}. Associação espacial, não causalidade.`,
+        }));
+      }
     } else kpis.push(`<div class="card kpi">${resultState(occR, "Ocorrências")}</div>`);
 
     if (st.est.status === "ok" && st.diaria.status === "ok") {
@@ -126,7 +129,9 @@ export default {
 
     root.querySelector("#c-avisos").innerHTML = card({
       title: "Avisos oficiais", sub: "Defesa Civil, CEMADEN, INMET",
-      body: avisos.status === "erro" ? resultState(avisos, "Avisos oficiais")
+      body: avisos.status === "nao_publicado"
+        ? stateBlock("unavailable", "Nenhuma fonte de avisos oficiais integrada", "Esta área exibirá avisos com origem e validade quando a integração existir. Os indicadores desta plataforma não são avisos nem alertas. Em emergência, ligue 199 (Defesa Civil).")
+        : avisos.status === "erro" ? resultState(avisos, "Avisos oficiais")
         : avisos.meta?.estado_integracao === "nao_integrado"
           ? stateBlock("unavailable", "Nenhuma fonte de avisos oficiais integrada", "Esta área exibirá avisos com origem e validade quando a integração existir. Os indicadores desta plataforma não são avisos nem alertas. Em emergência, ligue 199 (Defesa Civil).")
           : stateBlock("empty", "Nenhum aviso oficial vigente"),

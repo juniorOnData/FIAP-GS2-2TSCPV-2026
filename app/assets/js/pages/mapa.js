@@ -336,7 +336,7 @@ function renderLayersPanel() {
         <div class="legend__scale"><span>0</span>${br.filter((_, i) => i % 2 === 1).map((b) => `<span>${fmtInt(b)}</span>`).join("")}<span>${fmtInt(br[br.length - 1])}+</span></div>
         <div class="legend__row"><span class="legend__dot" style="background:#fff;border-color:#64748B;box-shadow:none"></span>Sem leitura na janela</div>
         <div class="note">A escala é de chuva, não de risco. ${ctx.st.horaria?.meta ? freshnessBadge(ctx.st.horaria.meta, "chuva_horaria") : ""}</div>
-      </div>`),
+      </div>`, { disabled: ctx.st.est.status !== "ok", reason: "Dados de chuva não publicados nesta versão." }),
     layerRow("nivel", "Nível de rios e córregos", "Sensores fluviométricos do SIBH · último valor horário",
       `<div class="legend">
         <div class="legend__row"><span class="legend__diamond" style="background:#0F8A73"></span>Sensor com leitura (m, unidade da fonte)</div>
@@ -457,7 +457,9 @@ function closeDetail() {
 function showOccurrence(key) {
   const o = ctx.occ.rows.find((x) => x.key === key);
   if (!o) return;
-  const g = o.grau ? `Dentro de área de suscetibilidade ${["", "baixa", "média", "alta"][o.grau]} a inundação (SGB/CPRM)` : "Fora das áreas mapeadas de suscetibilidade a inundação";
+  const g = Number.isInteger(o.grau)
+    ? o.grau ? `Dentro de área de suscetibilidade ${["", "baixa", "média", "alta"][o.grau]} a inundação (SGB/CPRM)` : "Fora das áreas mapeadas de suscetibilidade a inundação"
+    : ctx.susc.status === "ok" ? "Sem classe de suscetibilidade associada a este registro" : "Cruzamento com suscetibilidade não publicado nesta versão";
   openDetail(o.tipo, `
     <div class="pill-list">${natureBadge(ctx.occ.meta)}</div>
     <dl class="dl" style="margin-top:12px">

@@ -19,6 +19,15 @@ Depois, abra <http://localhost:8000>.
 
 O pacote de demonstração tem uma data de referência fixa. Depois de algumas horas, as leituras de chuva e nível aparecem como **desatualizadas**: é o comportamento esperado (F10). Regere o pacote para atualizar a referência.
 
+## Publicar a primeira Gold GeoSampa
+
+1. No Databricks, rode primeiro o job de GeoSampa até `quality_gold_geosampa`.
+2. Execute o notebook `data/src/geosampa/export/06_export_geosampa_web.py` (ou o job manual `data/jobs/chuvasegura_geosampa_web_export.job.yml`). Ele publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/geosampa_chuvasegura_web/`.
+3. Baixe esses três arquivos para `app/data/gold/` no repositório. A pasta contém dados públicos de ocorrência e ficará pública junto com o site.
+4. Em `assets/js/config.js`, troque `DATA_ROOT` de `data/demo` para `data/gold`, depois publique a alteração.
+
+O pacote inicial inclui só GeoSampa. A aplicação desativa camadas não publicadas e não apresenta o cruzamento com suscetibilidade como se estivesse disponível. Não misture arquivos de `data/demo/` com `data/gold/`.
+
 ## Publicar na Vercel
 
 1. Importe o repositório na Vercel e defina **Root Directory = `app`**.
@@ -66,6 +75,8 @@ app/
 | F18 avisos oficiais | Estado "não integrado" |
 | F19 exportar | CSV das ocorrências filtradas |
 | F20–F25 | Fora desta versão (gate de Data Science não aprovado; IBGE e OSM não publicados) |
+
+No pacote Gold parcial, o manifesto determina quais fontes foram publicadas. CEMADEN, SIBH, INMET e SGB só aparecem como publicados quando seus próprios artefatos estiverem no pacote.
 
 ## Acessibilidade
 
