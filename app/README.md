@@ -19,10 +19,9 @@ Depois, abra <http://localhost:8000>.
 
 O pacote de demonstração tem uma data de referência fixa. Depois de algumas horas, as leituras de chuva e nível aparecem como **desatualizadas**: é o comportamento esperado (F10). Regere o pacote para atualizar a referência.
 
-## Publicar a primeira Gold GeoSampa
+## Publicar a Gold no site
 
-1. No Databricks, rode primeiro o job de GeoSampa até `quality_gold_geosampa`.
-2. Execute o notebook `data/src/geosampa/export/06_export_geosampa_web.py` (ou o job manual `data/jobs/chuvasegura_geosampa_web_export.job.yml`). Ele publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/geosampa_chuvasegura_web/`.
+1. No Databricks, o job `ChuvaSegura` termina com a tarefa `export_web` (`data/src/shared/export/01_export_web.py`), depois de todas as fontes. Ela publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/chuvasegura_web/`, só com as fontes cuja qualidade Gold passou na mesma execução.
 3. Baixe esses três arquivos para `app/data/gold/` no repositório. A pasta contém dados públicos de ocorrência e ficará pública junto com o site.
 4. Em `assets/js/config.js`, troque `DATA_ROOT` de `data/demo` para `data/gold`, depois publique a alteração.
 

@@ -66,6 +66,6 @@ Para manter os arquivos leves, simplifique as geometrias para a escala de visual
 
 ## Primeira exportação GeoSampa
 
-O notebook `data/src/geosampa/export/06_export_geosampa_web.py` lê as tabelas Gold, confirma a última execução das regras de qualidade e publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/geosampa_chuvasegura_web/`. A exportação mantém somente pontos com coordenadas no envelope validado de São Paulo e registra no manifesto quantos registros foram omitidos.
+A tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_web.py`) roda depois de todas as fontes. Ela confere se a qualidade Gold de cada fonte passou na mesma execução e publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/chuvasegura_web/`. Só entram ocorrências com data e coordenadas no envelope validado de São Paulo; o manifesto registra quantos registros foram descartados (`registros_descartados`).
 
 Baixe os três arquivos do Volume para `app/data/gold/`. Depois, altere `DATA_ROOT` em `app/assets/js/config.js` para `data/gold` e publique o frontend. A aplicação usa o manifesto para sinalizar chuva, nível, suscetibilidade e outras fontes que ainda não estejam incluídas. O pacote real não inclui dados sintéticos.

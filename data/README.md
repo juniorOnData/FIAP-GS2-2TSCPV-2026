@@ -18,7 +18,7 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 
 ### Publicação para o site
 
-O notebook `src/geosampa/export/06_export_geosampa_web.py` exporta a Gold do GeoSampa para o contrato estático de `../app/DATA_CONTRACT.md`. Ele valida a última execução Gold de qualidade e grava três arquivos no Volume `fiap_analytics.gold.geosampa_chuvasegura_web`. Para publicar no site estático, baixe-os para `app/data/gold/` e altere `DATA_ROOT` para `data/gold`. Essa primeira publicação contém ocorrências e o cadastro de subprefeituras; as demais fontes são acrescentadas em etapas posteriores.
+A última tarefa do job `ChuvaSegura`, `src/shared/export/01_export_web.py`, exporta a Gold para o contrato estático de `../app/DATA_CONTRACT.md` e grava os arquivos no Volume `fiap_analytics.gold.chuvasegura_web`. Cada fonte só é exportada se a qualidade Gold dela passou na mesma execução do job. Para publicar no site, copie os arquivos para `app/data/gold/` e altere `DATA_ROOT` para `data/gold`. Por enquanto o pacote tem ocorrências e subprefeituras do GeoSampa; as demais fontes entram em etapas posteriores.
 
 Tudo fica no catálogo `fiap_analytics` do Unity Catalog, em três camadas:
 
@@ -74,9 +74,9 @@ O número no início de cada arquivo indica a ordem de execução dentro da font
 
 ```
 jobs/                                             # definição dos jobs do Databricks (YAML)
+├── chuvasegura.job.yml                           # job principal: dim_tempo → fontes → export_web (único com agenda)
 ├── chuvasegura_cemaden.job.yml
 ├── chuvasegura_geosampa.job.yml
-├── chuvasegura_geosampa_web_export.job.yml
 ├── chuvasegura_ibge.job.yml
 ├── chuvasegura_inmet.job.yml
 ├── chuvasegura_osm.job.yml
@@ -90,8 +90,10 @@ src/
 │   ├── geo.py                                    # shapefile, GeoPackage, WKB, UTM 23S <-> lat/lon, área e centroide
 │   └── ingestion_log.py                          # log de ingestão padrão (módulo Python)
 ├── shared/
-│   └── transformations/gold/
-│       └── 00_dim_tempo.sql                      # dimensão de tempo compartilhada pelas fatos
+│   ├── transformations/gold/
+│   │   └── 00_dim_tempo.sql                      # dimensão de tempo compartilhada pelas fatos (1ª tarefa do job ChuvaSegura)
+│   └── export/
+│       └── 01_export_web.py                      # publica a Gold no contrato do site (última tarefa do job ChuvaSegura)
 ├── cemaden/
 │   ├── ingestion/
 │   │   ├── 01_cemaden_stations_landing.py
@@ -289,7 +291,7 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 
 ### Dimensão de tempo (compartilhada)
 
-`00_dim_tempo` cria e mantém a `fiap_analytics.gold.dim_tempo`: um dia por linha, de 2010 até o fim do ano seguinte, com chave `COD_DIM_TEMPO` no formato `yyyyMMdd`. É a única dimensão compartilhada entre as fontes. Toda fato do projeto usa essa chave, e fatos com granularidade menor que o dia (chuva por hora, por exemplo) guardam a hora na própria fato. O notebook roda no job `ChuvaSegura`, antes da fato do GeoSampa, e cada execução só acrescenta os dias que faltam.
+`00_dim_tempo` cria e mantém a `fiap_analytics.gold.dim_tempo`: um dia por linha, de 2010 até o fim do ano seguinte, com chave `COD_DIM_TEMPO` no formato `yyyyMMdd`. É a única dimensão compartilhada entre as fontes. Toda fato do projeto usa essa chave, e fatos com granularidade menor que o dia (chuva por hora, por exemplo) guardam a hora na própria fato. O notebook é a primeira tarefa do job `ChuvaSegura`, antes de todas as fontes, e cada execução só acrescenta os dias que faltam. Os jobs das fontes não o executam.
 
 ### GeoSampa
 
@@ -389,17 +391,32 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 
 ## Jobs e workflows
 
-Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YAML dos jobs do Databricks (`resources.jobs`). Separar por fonte faz com que uma falha numa API não trave as outras.
+O pipeline roda num único job com agenda, o `ChuvaSegura` (`jobs/chuvasegura.job.yml`), todo dia às 07:00 (America/Sao_Paulo):
 
-| Arquivo | Job | Agenda (America/Sao_Paulo) | Situação |
-|---|---|---|---|
-| `jobs/chuvasegura_geosampa.job.yml` | `ChuvaSegura` | todo dia às 09:00:30 | ativo |
-| `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | ativo |
-| `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | ativo |
-| `jobs/chuvasegura_sgb.job.yml` | `ChuvaSegura - SGB` | dia 1 de cada mês às 06:00 | ativo |
-| `jobs/chuvasegura_ibge.job.yml` | `ChuvaSegura - IBGE` | dia 1 de cada mês às 06:30 | ativo |
-| `jobs/chuvasegura_osm.job.yml` | `ChuvaSegura - OSM` | toda segunda-feira às 05:00 | ativo |
-| `jobs/chuvasegura_inmet.job.yml` | `ChuvaSegura - INMET` | toda segunda-feira às 08:00 | pausado até o backfill |
+1. `dim_tempo`: a única dimensão compartilhada, criada uma vez antes de todas as fontes.
+2. As sete fontes, em paralelo, cada uma no seu job (tarefas *Run job*). Separar por fonte faz com que uma falha numa API não trave as outras.
+3. `export_web`: publica a Gold no Volume do site. Roda mesmo se alguma fonte falhar (`run_if: ALL_DONE`), mas só exporta as fontes cuja qualidade Gold passou nesta execução.
+
+```mermaid
+flowchart LR
+  T[dim_tempo] --> G[GeoSampa] & C[CEMADEN] & S[SIBH] & N[INMET] & I[IBGE] & B[SGB] & O[OSM]
+  G & C & S & N & I & B & O --> E[export_web]
+```
+
+Os jobs das fontes não têm agenda própria. As fontes que mudam pouco (SGB, IBGE, OSM, INMET) também rodam todo dia, mas a landing só baixa de novo quando o arquivo da fonte muda e registra `SEM_DADOS`, então a execução é curta.
+
+| Arquivo | Job |
+|---|---|
+| `jobs/chuvasegura.job.yml` | `ChuvaSegura` (principal, com agenda) |
+| `jobs/chuvasegura_geosampa.job.yml` | `ChuvaSegura - GeoSampa` |
+| `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` |
+| `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` |
+| `jobs/chuvasegura_inmet.job.yml` | `ChuvaSegura - INMET` |
+| `jobs/chuvasegura_ibge.job.yml` | `ChuvaSegura - IBGE` |
+| `jobs/chuvasegura_sgb.job.yml` | `ChuvaSegura - SGB` |
+| `jobs/chuvasegura_osm.job.yml` | `ChuvaSegura - OSM` |
+
+Tarefas de cada job de fonte (a `dim_tempo` vem do job principal):
 
 ```mermaid
 flowchart LR
@@ -411,7 +428,6 @@ flowchart LR
     CQ1 --> C7[04_dim_cemaden_stations]
     CQ1 --> C8[05_fact_cemaden_rainfall_hourly]
     C7 --> C8
-    CT[00_dim_tempo] --> C8
     C8 --> CQ2{{05_cemaden_gold_quality}}
   end
   subgraph sibh["ChuvaSegura - SIBH"]
@@ -426,12 +442,11 @@ flowchart LR
     SQ1 --> S9[07_fact_sibh_level_hourly]
     S7 --> S8
     S7 --> S9
-    ST[00_dim_tempo] --> S8
     ST --> S9
     S8 --> SQ2{{07_sibh_gold_quality}}
     S9 --> SQ2
   end
-  subgraph geosampa["ChuvaSegura (GeoSampa)"]
+  subgraph geosampa["ChuvaSegura - GeoSampa"]
     G1[01_geosampa_history_flooding_events_bronze] --> G3[02_geosampa_flooding_events_silver]
     G2[01_geosampa_subprefecture_area_bronze] --> G3
     G2 --> G4[03_dim_geosampa_subprefecture_area]
@@ -440,7 +455,6 @@ flowchart LR
     Q1 --> G6[04_fact_geosampa_flooding_events]
     G4 --> G6
     G5 --> G6
-    T0[00_dim_tempo] --> G6
     G6 --> Q2{{04_geosampa_gold_quality}}
   end
   subgraph sgb["ChuvaSegura - SGB"]
@@ -454,7 +468,6 @@ flowchart LR
     I3 --> IQ1{{03_ibge_silver_quality}}
     IQ1 --> I4[04_dim_ibge_census_tracts] --> I5[05_fact_ibge_census_tract_population]
     IQ1 --> I5
-    IT[00_dim_tempo] --> I5
     I5 --> IQ2{{05_ibge_gold_quality}}
   end
   subgraph osm["ChuvaSegura - OSM"]
@@ -471,7 +484,6 @@ flowchart LR
     N4 --> NQ1
     NQ1 --> N5[04_dim_inmet_stations] --> N6[05_fact_inmet_weather_hourly]
     NQ1 --> N6
-    NT[00_dim_tempo] --> N6
     N6 --> NQ2{{05_inmet_gold_quality}}
   end
 ```
@@ -481,22 +493,23 @@ Todos os jobs:
 - apontam para os notebooks no Git folder `/Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026`, na subpasta `data/src/`. Se o repositório estiver clonado em outro lugar, troque esse prefixo em todos os arquivos de `jobs/`.
 - **Mudança de estrutura:** os notebooks saíram de `src/` para `data/src/`. Depois de atualizar o Git folder no Databricks para esta versão, os jobs já existentes no workspace precisam ter os caminhos das tarefas atualizados (iguais aos dos YAMLs); senão, falham por não encontrar o notebook.
 
-**Antes de ativar CEMADEN, SIBH e INMET:**
+**Antes de ativar a agenda do `ChuvaSegura`** (o job principal chama CEMADEN, SIBH e INMET em modo incremental):
 1. Rode uma vez, manualmente, a carga do histórico com o modo `backfill`:
    - CEMADEN: `01_cemaden_rainfall_readings_landing` com `modo = backfill`;
    - SIBH: `03_sibh_measurements_landing` com `mode = backfill`;
    - INMET: `01_inmet_weather_landing` com `modo = backfill` (de 2020 até o ano corrente, poucos minutos).
 2. Rode as Bronzes correspondentes.
-3. Mude `pause_status` para `UNPAUSED`, ou ative a agenda na interface. O job do INMET vem com a agenda pausada por isso.
+3. Ative a agenda do `ChuvaSegura`. Os jobs das fontes não têm agenda própria.
 
 O incremental diário cobre o mês atual e completa os meses parciais (no INMET, o ano atual e os anos parciais).
 
 **SGB, IBGE e OSM** não precisam de carga inicial: a primeira execução do job baixa a versão atual.
 
 **Como aplicar os YAMLs:**
-- **Job que já existe** (`ChuvaSegura`): troque o caminho de cada tarefa pelo do YAML. Em *Workflows → ChuvaSegura*, abra cada tarefa e edite o campo *Path*.
+- **Job que já existe:** troque o caminho de cada tarefa pelo do YAML. Em *Workflows*, abra cada tarefa e edite o campo *Path*.
+- **Migração para o job principal:** em cada job de fonte, remova a tarefa `dim_tempo` e a agenda; renomeie o job do GeoSampa para `ChuvaSegura - GeoSampa`. O `ChuvaSegura` chama os jobs das fontes pelo `job_id` do workspace.
 - **Job novo:** crie em *Workflows → Create job*, com as tarefas, dependências, parâmetros (`base_parameters`) e agenda do arquivo.
-- **Com a Databricks CLI:** os arquivos já estão no formato de *resources* dos Databricks Asset Bundles. Para usar `databricks bundle deploy`, é preciso um `databricks.yml` (nesta pasta, incluindo `jobs/*.job.yml`, ou na raiz do repositório, incluindo `data/jobs/*.job.yml`). Para o bundle passar a gerenciar o `ChuvaSegura` já existente em vez de criar outro, use `databricks bundle deployment bind ChuvaSegura <job_id>`.
+- **Com a Databricks CLI:** os arquivos já estão no formato de *resources* dos Databricks Asset Bundles. Para usar `databricks bundle deploy`, é preciso um `databricks.yml` (nesta pasta, incluindo `jobs/*.job.yml`, ou na raiz do repositório, incluindo `data/jobs/*.job.yml`). Para o bundle passar a gerenciar um job já existente em vez de criar outro, use `databricks bundle deployment bind <chave> <job_id>`; no `chuvasegura.job.yml`, troque os `job_id` fixos por `${resources.jobs.<chave>.id}`.
 
 Sempre que um notebook mudar de nome ou de pasta, atualize o YAML no mesmo PR.
 

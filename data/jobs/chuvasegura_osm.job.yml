@@ -1,14 +1,11 @@
 # Job do OpenStreetMap: rede viária do município de São Paulo (extrato da Geofabrik), da landing até a Gold.
-# A Geofabrik publica um extrato novo por dia; a rede muda pouco de uma semana para outra, então a agenda é semanal.
+# A Geofabrik publica um extrato novo por dia; a landing só baixa de novo quando o extrato muda.
 # A qualidade da Silver barra a Gold. Dados © OpenStreetMap contributors, ODbL 1.0.
+# Sem agenda própria: roda dentro do job ChuvaSegura (chuvasegura.job.yml), depois da dim_tempo.
 resources:
   jobs:
     ChuvaSegura_OSM:
       name: ChuvaSegura - OSM
-      schedule:
-        quartz_cron_expression: "0 0 5 ? * MON"
-        timezone_id: America/Sao_Paulo
-        pause_status: UNPAUSED
       tasks:
         - task_key: osm_roads_landing
           notebook_task:

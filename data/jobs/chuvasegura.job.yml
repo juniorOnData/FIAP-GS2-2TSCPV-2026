@@ -1,0 +1,78 @@
+# Job principal do ChuvaSegura: orquestra o pipeline inteiro numa execução diária.
+#   1. dim_tempo: a única dimensão compartilhada, criada uma vez antes de todas as fontes.
+#   2. As sete fontes, cada uma no seu job (landing até a Gold, com as travas de qualidade), em paralelo.
+#   3. export_web: publica a Gold no Volume do site. Roda mesmo se alguma fonte falhar (ALL_DONE); o
+#      notebook só exporta as fontes cuja qualidade Gold passou nesta execução.
+# Os jobs das fontes não têm agenda própria: só este job tem agenda.
+# Os job_id são os do workspace; num Databricks Asset Bundle, troque por ${resources.jobs.<chave>.id}.
+resources:
+  jobs:
+    ChuvaSegura:
+      name: ChuvaSegura
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"
+        timezone_id: America/Sao_Paulo
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: dim_tempo
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/transformations/gold/00_dim_tempo
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: GeoSampa
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 488338836279807
+        - task_key: CEMADEN
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 475130934525942
+        - task_key: SIBH
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 934859105164844
+        - task_key: INMET
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 71154768160810
+        - task_key: IBGE
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 514178423565582
+        - task_key: SGB
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 811317802899650
+        - task_key: OSM
+          depends_on:
+            - task_key: dim_tempo
+          run_job_task:
+            job_id: 565519929679330
+        - task_key: export_web
+          depends_on:
+            - task_key: GeoSampa
+            - task_key: CEMADEN
+            - task_key: SIBH
+            - task_key: INMET
+            - task_key: IBGE
+            - task_key: SGB
+            - task_key: OSM
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/export/01_export_web
+            base_parameters:
+              inicio_execucao: "{{job.start_time.iso_datetime}}"
+            source: WORKSPACE
+          environment_key: Default
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
