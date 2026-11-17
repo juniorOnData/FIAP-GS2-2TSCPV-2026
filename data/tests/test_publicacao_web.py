@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from common import github_publish  # noqa: E402
 from common.publicacao_web import (  # noqa: E402
-    TZ_SP, data_para_cod, hora_sp, iso_sp, pior_qualidade, serie_diaria, serie_horaria, sha256_dados,
+    FATOR_PARA_METRO, TZ_SP, data_para_cod, hora_sp, iso_sp, pior_qualidade, serie_diaria, serie_horaria, sha256_dados,
 )
 
 
@@ -58,6 +58,10 @@ class SeriesTest(unittest.TestCase):
     def test_nan_e_rejeitado(self):
         with self.assertRaises(ValueError):
             sha256_dados({"a": float("nan")})
+
+    def test_cota_do_sibh_em_cm_vira_metro(self):
+        self.assertAlmostEqual(72869.058 * FATOR_PARA_METRO["cm"], 728.69058)
+        self.assertEqual(FATOR_PARA_METRO["m"], 1.0)
 
     def test_pior_qualidade(self):
         self.assertEqual(pior_qualidade(["aprovado", "aprovado_com_avisos"]), "aprovado_com_avisos")

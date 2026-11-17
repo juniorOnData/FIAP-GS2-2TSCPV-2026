@@ -1,4 +1,4 @@
-// Visão geral (F06): indicadores da cidade no recorte ativo e atalhos.
+// Indicadores (F06): indicadores da cidade no recorte ativo e atalhos.
 import { icon } from "../icons.js";
 import { esc, fmtInt, fmt1, fmtPct, fmtDateTime, groupCount, mean, fmtMonth } from "../util.js";
 import { store, resolvePeriod, previousPeriod } from "../store.js";

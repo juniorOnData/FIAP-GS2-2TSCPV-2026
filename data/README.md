@@ -27,7 +27,7 @@ A última tarefa do job `ChuvaSegura`, `src/shared/export/01_export_web.py`, exp
 - **Fontes que ainda não rodaram:** o widget `fontes` (padrão `geosampa,cemaden,sibh,inmet`) escolhe o que exportar. Antes do backfill do INMET, tire `inmet`.
 - **Segredo:** scope `github`, chave `token`, com um token do GitHub de permissão *Contents: read and write* **só neste repositório** (fine-grained). Crie com `databricks secrets create-scope github` e `databricks secrets put-secret github token`. O token nunca é gravado em arquivo ou log.
 - **Branch:** o commit vai para a branch de produção da Vercel (widget `github_branch`, padrão `main`). Se ela tiver proteção que exige PR, o commit falha: use uma branch de dados dedicada e aponte a Vercel para ela, ou libere o token na regra.
-- **Unidade do nível:** o widget `unidade_nivel` (padrão `m`) é o rótulo do nível no site. A fato guarda o valor "na unidade da fonte", então confirme a unidade do SIBH antes de confiar no rótulo.
+- **Unidade do nível:** a fato guarda a cota do SIBH em centímetros (valores entre 71.000 e 79.000 nos rios da capital, ou seja, 710 a 790 m de altitude). O widget `unidade_nivel_origem` (padrão `cm`) diz a unidade da fonte, e o export converte para metros e declara `unidade_origem` no `nivel.json`.
 - **Testes:** `python -m unittest discover -s data/tests` (séries e publicação no GitHub, sem Spark nem rede).
 
 Tudo fica no catálogo `fiap_analytics` do Unity Catalog, em três camadas:

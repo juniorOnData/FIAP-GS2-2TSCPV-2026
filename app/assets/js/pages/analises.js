@@ -1,4 +1,4 @@
-// Análises (F12 + insights 8.3 + gate de Data Science, seção 11).
+// Previsões e Análises (F12 + insights 8.3 + gate de Data Science, seção 11). Previsões entram aqui após o gate.
 import { icon } from "../icons.js";
 import { esc, fmtInt, fmt1, fmt2, fmtPct, groupCount } from "../util.js";
 import { store, resolvePeriod } from "../store.js";
@@ -17,7 +17,7 @@ const GATE = [
 ];
 
 export default {
-  subtitle: "Recorrência, suscetibilidade territorial e padrões descritivos",
+  subtitle: "Previsões (após o gate de Data Science), recorrência, suscetibilidade e padrões descritivos",
   async render(root) {
     const f = store.filters;
     const per = resolvePeriod();
@@ -138,8 +138,8 @@ function gateCard() {
     <div class="card__body">
       <div class="gate__head">
         <div>${icon("flask")}</div>
-        <div><h3>Gate de Data Science: não aprovado</h3>
-        <p>Enquanto os critérios da seção 11 do PDR não forem atendidos, a plataforma mostra análises históricas e, quando publicada, suscetibilidade territorial. Nenhuma classe ou score de risco, previsão ou alerta é exibido.</p></div>
+        <div><h3>Previsões: aguardando o gate de Data Science</h3>
+        <p>Os modelos preditivos entram nesta página quando os critérios da seção 11 do PDR forem atendidos. Até lá, ela mostra análises históricas e, quando publicada, suscetibilidade territorial; nenhuma previsão, classe ou score de risco é exibido. Os <a href="#/alertas">alertas da plataforma</a> usam só regras sobre chuva e nível observados, sem modelo.</p></div>
       </div>
       <details><summary>Ver os 6 critérios e a situação de cada um</summary>
         <ul class="gate__list">${GATE.map(([t, s, d]) => `<li>${b[s]}<span><strong>${esc(t)}</strong><small>${esc(d)}</small></span></li>`).join("")}</ul>

@@ -1,7 +1,7 @@
 // Histórico (F08): séries de ocorrências, chuva e nível, respeitando a granularidade de cada fonte.
 import { esc, fmtInt, fmt1, fmt2, fmtDay, fmtMonth, fmtMonthLong, groupCount, addDays, diffDays, MESES_LONGOS } from "../util.js";
 import { store, resolvePeriod } from "../store.js";
-import { getOccurrences, filterOccurrences, getStations, filterStations, load, monthsBetween, cityDaily } from "../data.js";
+import { getOccurrences, filterOccurrences, getStations, filterStations, load, monthsBetween, cityDaily, serieNivel } from "../data.js";
 import { filterBar, bindFilterBar, subprefNome, stateBlock, resultState, natureBadge, provenance, card, table } from "../ui.js";
 import { columnChart, lineChart, barList, chartBlock, legendKeys, TYPE_COLORS, RAIN_RAMP } from "../charts.js";
 
@@ -125,15 +125,16 @@ export default {
     if (!levelSel || !sens.find((s) => s.id === levelSel)) levelSel = sens[0].id;
     const drawL = () => {
       const s = sens.find((x) => x.id === levelSel);
-      const dv = nivel.data.diario[s.id];
+      const dv = serieNivel(nivel, "diario", s.id);
       const days = dv.map((_, i) => addDays(nivel.data.diario_inicio, i));
       hl.innerHTML = card({
-        title: "Nível médio diário", sub: `Últimos 12 meses (cobertura publicada para a web) · metros, unidade da fonte`,
+        title: "Nível médio diário", sub: `Últimos 12 meses (cobertura publicada para a web) · cota em metros`,
         actions: `<div class="field" style="min-width:260px"><label for="lvl-sel">Sensor</label><select class="select" id="lvl-sel">${sens.map((x) => `<option value="${esc(x.id)}" ${x.id === levelSel ? "selected" : ""}>${esc(x.curso_dagua)} · ${esc(x.codigo)}</option>`).join("")}</select></div>`,
         body: '<div id="b7"></div>', foot: provenance(nivel.meta),
       });
       const el = chartBlock(hl.querySelector("#b7"), { tableHtml: table([{ key: "d", label: "Dia" }, { key: "v", label: "m", num: true }], days.map((d, i) => ({ d: fmtDay(d), v: dv[i] === null ? "sem leitura" : fmt2(dv[i]) })).reverse()) });
-      lineChart(el, { labels: days.map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`), series: [{ name: s.curso_dagua, color: "#0F8A73", values: dv }], unit: "m", fmt: fmt2, minZero: false, height: 220, tipTitle: (i) => fmtDay(days[i]), ariaLabel: "Nível médio diário" });
+      if (!dv.some((v) => v !== null)) el.innerHTML = stateBlock("empty", "Sem leituras nos últimos 12 meses", "O sensor pode estar fora de operação.");
+      else lineChart(el, { labels: days.map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`), series: [{ name: s.curso_dagua, color: "#0F8A73", values: dv }], unit: "m", fmt: fmt2, minZero: false, height: 220, tipTitle: (i) => fmtDay(days[i]), ariaLabel: "Nível médio diário" });
       hl.querySelector("#lvl-sel").addEventListener("change", (e) => { levelSel = e.target.value; drawL(); hl.querySelector("#lvl-sel").focus(); });
     };
     drawL();

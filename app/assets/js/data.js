@@ -127,6 +127,12 @@ export function rainLastHours(horaria, id, horas) {
   return { mm: validos.length ? validos.reduce((a, b) => a + b, 0) : null, cobertura: validos.length / horas };
 }
 
+// Sensor cadastrado sem leitura no período publicado: série só de nulos, do mesmo tamanho das demais.
+export function serieNivel(nivel, tipo, id) {
+  const series = nivel.data[tipo];
+  return series[id] || new Array(Object.values(series)[0]?.length || 0).fill(null);
+}
+
 export function hourlyTimes(horaria) {
   const start = Date.parse(horaria.data.inicio);
   const n = Object.values(horaria.data.series)[0]?.length || 0;

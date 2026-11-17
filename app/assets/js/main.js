@@ -4,12 +4,13 @@ import { esc, fmtDateTime, $ } from "./util.js";
 import { loadManifest, load, isDemo, getManifest } from "./data.js";
 import { store } from "./store.js";
 import { setSubprefeituras, stateBlock } from "./ui.js";
-import { ROUTE_META } from "./routes.js";
+import { ROUTE_META, ENTRY_ROUTE } from "./routes.js";
 
 import portal from "./pages/portal.js";
-import overview from "./pages/overview.js";
 import mapa from "./pages/mapa.js";
+import indicadores from "./pages/indicadores.js";
 import monitoramento from "./pages/monitoramento.js";
+import alertas from "./pages/alertas.js";
 import historico from "./pages/historico.js";
 import analises from "./pages/analises.js";
 import dados from "./pages/dados.js";
@@ -17,7 +18,7 @@ import conhecimento from "./pages/conhecimento.js";
 import assistente from "./pages/assistente.js";
 import perfil from "./pages/perfil.js";
 
-const PAGES = { overview, mapa, monitoramento, historico, analises, dados, conhecimento, assistente, perfil };
+const PAGES = { mapa, indicadores, monitoramento, alertas, historico, analises, dados, conhecimento, assistente, perfil };
 const ROUTES = Object.fromEntries(Object.entries(ROUTE_META).map(([k, r]) => [k, { ...r, page: PAGES[k] }]));
 
 const app = $("#app");
@@ -98,7 +99,7 @@ async function route() {
   }
   const r = ROUTES[name];
   if (!r) {
-    location.replace("#/overview");
+    location.replace(`#/${ENTRY_ROUTE}`);
     return;
   }
   renderShell(name);

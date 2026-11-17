@@ -12,9 +12,9 @@ export default {
       <header class="portal__nav">
         <a class="brand" href="#/" style="padding:0">${LOGO}<span class="brand__name">Chuva<span>Segura</span>-SP<span class="brand__tag">Urban Intelligence</span></span></a>
         <nav class="portal__links" aria-label="Portal">
-          <a href="#/overview">Painéis</a><a href="#/mapa">Mapa</a><a href="#/dados">Sobre os dados</a><a href="#/conhecimento">Base de conhecimento</a>
+          <a href="#/mapa">Mapa</a><a href="#/indicadores">Indicadores</a><a href="#/alertas">Alertas</a><a href="#/dados">Sobre os dados</a><a href="#/conhecimento">Base de conhecimento</a>
         </nav>
-        <a class="btn btn--primary btn--sm" href="#/overview">Acessar a plataforma</a>
+        <a class="btn btn--primary btn--sm" href="#/mapa">Acessar a plataforma</a>
       </header>
 
       <section class="hero" aria-labelledby="hero-title">

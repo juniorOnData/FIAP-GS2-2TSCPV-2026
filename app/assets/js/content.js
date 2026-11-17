@@ -42,7 +42,7 @@ export const FONTES = [
     licenca: "Dados públicos do SIBH.",
     tabelas: ["gold.dim_sibh_sensors", "gold.fact_sibh_rainfall_hourly", "gold.fact_sibh_level_hourly"],
     limitacoes: [
-      "O nível vem na unidade informada pela fonte.",
+      "O nível é a cota do SIBH, publicada em centímetros e convertida para metros: altitude da superfície da água na referência de cada sensor, não a profundidade do rio. Compare a variação de um mesmo sensor, não o valor entre sensores.",
       "Não há cotas oficiais de transbordamento integradas: o nível não é classificado como normal ou crítico.",
       "Chuva e nível de um mesmo local têm sensores diferentes com o mesmo código de estação.",
     ],
@@ -123,7 +123,7 @@ export const KB = [
   { id: "chuva-acumulada", tipo: "glossario", titulo: "Chuva acumulada (mm)", texto: "Quantidade de chuva somada em uma janela de tempo. 1 mm equivale a 1 litro de água por metro quadrado.", tags: "milimetro litro precipitacao" },
   { id: "janela", tipo: "glossario", titulo: "Janela móvel", texto: "Período que termina na última hora publicada, como as últimas 24 horas. Se os dados estiverem desatualizados, a janela termina na hora publicada, não no horário atual.", tags: "24h 72h periodo" },
   { id: "pluviometro", tipo: "glossario", titulo: "Pluviômetro", texto: "Equipamento que mede a chuva em um ponto. As redes CEMADEN, SIBH e INMET têm pluviômetros automáticos na capital.", tags: "estacao chuva sensor" },
-  { id: "fluviometro", tipo: "glossario", titulo: "Sensor de nível (fluviométrico)", texto: "Mede o nível da água de um rio ou córrego. No ChuvaSegura-SP vem do SIBH, na unidade informada pela fonte.", tags: "nivel rio cota" },
+  { id: "fluviometro", tipo: "glossario", titulo: "Sensor de nível (fluviométrico)", texto: "Mede o nível da água de um rio ou córrego. No ChuvaSegura-SP vem do SIBH como cota (altitude da superfície da água na referência do sensor), convertida de centímetros para metros. Não é a profundidade do rio.", tags: "nivel rio cota" },
   { id: "cota", tipo: "glossario", titulo: "Cota de transbordamento", texto: "Nível a partir do qual um curso d'água extravasa. Nenhuma cota oficial está integrada nesta versão; por isso os níveis não são classificados.", tags: "limiar nivel alerta" },
   { id: "setor", tipo: "glossario", titulo: "Setor censitário", texto: "Menor unidade territorial de coleta do Censo do IBGE. Dados por setor são agregados e não identificam pessoas.", tags: "ibge censo populacao" },
   { id: "subprefeitura", tipo: "glossario", titulo: "Subprefeitura", texto: "Divisão administrativa do município de São Paulo (32 unidades). É o recorte territorial dos filtros.", tags: "territorio recorte" },
