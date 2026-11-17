@@ -76,7 +76,9 @@ regras = [
 
     # Leituras: valor
     nao_nulo(LEITURAS, "nr_chuva_mm", severidade="AVISO", limite=0.01),
-    condicao("chuva_nao_negativa", LEITURAS, "Chuva maior ou igual a zero", "nr_chuva_mm < 0"),
+    condicao("chuva_nao_negativa", LEITURAS, "Chuva maior ou igual a zero (negativos da fonte ficam nulos na Silver)", "nr_chuva_mm < 0"),
+    condicao("chuva_negativa_na_fonte", LEITURAS, "Leituras recebidas com valor negativo (anuladas na Silver; original em nr_chuva_mm_origem)",
+             "fl_valor_invalido", severidade="AVISO", limite=0.0001),
     condicao("leitura_acima_de_50mm", LEITURAS, "Leituras com mais de 50 mm (valor fora do comum para uma leitura)",
              "nr_chuva_mm > 50", severidade="AVISO", limite=0.0001),
 
