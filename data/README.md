@@ -507,6 +507,7 @@ O incremental diário cobre o mês atual e completa os meses parciais (no INMET,
 
 **Como aplicar os YAMLs:**
 - **Job que já existe:** troque o caminho de cada tarefa pelo do YAML. Em *Workflows*, abra cada tarefa e edite o campo *Path*.
+- **Erro "Unable to access the notebook ... /src/...":** o job do workspace ainda aponta para o caminho antigo (`.../FIAP-GS2-2TSCPV-2026/src/`), e os notebooks agora estão em `.../data/src/`. Atualize o Git folder (*Pull*) e rode `python data/scripts/corrigir_caminhos_jobs.py` (simulação) e depois com `--aplicar`. O script lê `DATABRICKS_HOST` e `DATABRICKS_TOKEN` do ambiente, altera só o caminho das tarefas de notebook dos jobs `ChuvaSegura*` e é seguro rodar de novo.
 - **Migração para o job principal:** em cada job de fonte, remova a tarefa `dim_tempo` e a agenda; renomeie o job do GeoSampa para `ChuvaSegura - GeoSampa`. O `ChuvaSegura` chama os jobs das fontes pelo `job_id` do workspace.
 - **Job novo:** crie em *Workflows → Create job*, com as tarefas, dependências, parâmetros (`base_parameters`) e agenda do arquivo.
 - **Com a Databricks CLI:** os arquivos já estão no formato de *resources* dos Databricks Asset Bundles. Para usar `databricks bundle deploy`, é preciso um `databricks.yml` (nesta pasta, incluindo `jobs/*.job.yml`, ou na raiz do repositório, incluindo `data/jobs/*.job.yml`). Para o bundle passar a gerenciar um job já existente em vez de criar outro, use `databricks bundle deployment bind <chave> <job_id>`; no `chuvasegura.job.yml`, troque os `job_id` fixos por `${resources.jobs.<chave>.id}`.
