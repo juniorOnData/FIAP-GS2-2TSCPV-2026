@@ -305,6 +305,8 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 
 ### GeoSampa
 
+O funcionamento técnico das tarefas, das transformações geoespaciais e das regras de qualidade está descrito no [Guia técnico do pipeline GeoSampa](GEOSAMPA_PIPELINE.md).
+
 | # | Notebook | Depende de |
 |---|---|---|
 | 1 | `01_geosampa_subprefecture_area_bronze` | — |
