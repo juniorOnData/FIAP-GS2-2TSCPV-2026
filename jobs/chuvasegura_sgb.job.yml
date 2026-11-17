@@ -1,0 +1,59 @@
+# Job do SGB: carta de suscetibilidade a movimentos de massa e inundações do município de São Paulo, da landing até a Gold.
+# A carta é estática (2015): a landing só baixa de novo se o pacote mudar no RIGEO, então a agenda mensal é barata.
+# A qualidade da Silver barra a Gold.
+resources:
+  jobs:
+    ChuvaSegura_SGB:
+      name: ChuvaSegura - SGB
+      schedule:
+        quartz_cron_expression: "0 0 6 1 * ?"
+        timezone_id: America/Sao_Paulo
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: sgb_susceptibility_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/ingestion/01_sgb_susceptibility_landing
+            source: WORKSPACE
+        - task_key: sgb_susceptibility_bronze
+          depends_on:
+            - task_key: sgb_susceptibility_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/transformations/bronze/02_sgb_susceptibility_bronze
+            source: WORKSPACE
+        - task_key: sgb_susceptibility_areas_silver
+          depends_on:
+            - task_key: sgb_susceptibility_bronze
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/transformations/silver/03_sgb_susceptibility_areas_silver
+            source: WORKSPACE
+        - task_key: quality_silver_sgb
+          depends_on:
+            - task_key: sgb_susceptibility_areas_silver
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/quality/03_sgb_silver_quality
+            source: WORKSPACE
+        - task_key: dim_sgb_susceptibility_class
+          depends_on:
+            - task_key: quality_silver_sgb
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/transformations/gold/04_dim_sgb_susceptibility_class
+            source: WORKSPACE
+        - task_key: dim_sgb_susceptibility_areas
+          depends_on:
+            - task_key: dim_sgb_susceptibility_class
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/transformations/gold/05_dim_sgb_susceptibility_areas
+            source: WORKSPACE
+        - task_key: quality_gold_sgb
+          depends_on:
+            - task_key: dim_sgb_susceptibility_areas
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/sgb/quality/05_sgb_gold_quality
+            source: WORKSPACE
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
+      performance_target: PERFORMANCE_OPTIMIZED
