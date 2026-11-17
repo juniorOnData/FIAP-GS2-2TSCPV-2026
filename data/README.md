@@ -630,6 +630,8 @@ ORDER BY executado_em DESC;
 
 ## Tabelas geradas
 
+Para o inventário consolidado, a granularidade e o dicionário de colunas das tabelas, consulte o [Dicionário de dados](DATA_DICTIONARY.md).
+
 | Camada | Tabela | Conteúdo |
 |---|---|---|
 | bronze | `cemaden_stations` | Snapshots diários do cadastro de estações do CEMADEN |
