@@ -12,43 +12,43 @@ resources:
       tasks:
         - task_key: osm_roads_landing
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/ingestion/01_osm_roads_landing
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/ingestion/01_osm_roads_landing
             source: WORKSPACE
         - task_key: osm_roads_bronze
           depends_on:
             - task_key: osm_roads_landing
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/transformations/bronze/02_osm_roads_bronze
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/transformations/bronze/02_osm_roads_bronze
             source: WORKSPACE
         - task_key: osm_roads_silver
           depends_on:
             - task_key: osm_roads_bronze
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/transformations/silver/03_osm_roads_silver
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/transformations/silver/03_osm_roads_silver
             source: WORKSPACE
         - task_key: quality_silver_osm
           depends_on:
             - task_key: osm_roads_silver
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/quality/03_osm_silver_quality
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/quality/03_osm_silver_quality
             source: WORKSPACE
         - task_key: dim_osm_road_class
           depends_on:
             - task_key: quality_silver_osm
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/transformations/gold/04_dim_osm_road_class
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/transformations/gold/04_dim_osm_road_class
             source: WORKSPACE
         - task_key: dim_osm_roads
           depends_on:
             - task_key: dim_osm_road_class
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/transformations/gold/05_dim_osm_roads
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/transformations/gold/05_dim_osm_roads
             source: WORKSPACE
         - task_key: quality_gold_osm
           depends_on:
             - task_key: dim_osm_roads
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/osm/quality/05_osm_gold_quality
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/quality/05_osm_gold_quality
             source: WORKSPACE
       queue:
         enabled: true

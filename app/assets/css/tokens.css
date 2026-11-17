@@ -1,0 +1,103 @@
+/*
+ * ChuvaSegura-SP — tokens do Design System & Visual Guidelines v1.0 (Urban Intelligence).
+ * Fonte única de cores, tipografia e espaçamento. Tema claro.
+ */
+:root {
+  color-scheme: light;
+
+  /* Institucional — não representa nível de risco */
+  --royal: #155EEF;
+  --royal-hover: #0F4FD1;
+  --royal-press: #0B3FA8;
+  --ice: #EAF1FE;
+  --ice-strong: #D6E4FD;
+
+  /* Semânticas — só com critério documentado, sempre com texto e ícone */
+  --sem-normal: #16A34A;
+  --sem-atencao: #EAB308;
+  --sem-alerta: #F97316;
+  --sem-critico: #DC2626;
+
+  /* Neutros */
+  --bg: #F5F8FC;
+  --surface: #FFFFFF;
+  --surface-2: #F8FAFC;
+  --text: #0F172A;
+  --text-2: #475569;
+  --text-3: #64748B;
+  --border: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --grid: #EEF2F6;
+
+  /* Escala de chuva (azul sequencial próprio, claro → escuro) */
+  --rain-0: #EAF2FD;
+  --rain-1: #CDE2FB;
+  --rain-2: #9EC5F4;
+  --rain-3: #6DA7EC;
+  --rain-4: #3987E5;
+  --rain-5: #256ABF;
+  --rain-6: #184F95;
+  --rain-7: #0D366B;
+
+  /* Suscetibilidade (rampa violeta, distinta de chuva e de alertas) */
+  --susc-1: #E4DEFB;
+  --susc-2: #B4A7EF;
+  --susc-3: #6250D6;
+
+  /* Ocorrências históricas e sensores de nível */
+  --occ: #1E293B;
+  --level: #0F8A73;
+
+  /* Séries categóricas (ordem fixa, validada para pares adjacentes) */
+  --series-1: #2A78D6;
+  --series-2: #EB6834;
+  --series-3: #1BAF7A;
+  --series-4: #EDA100;
+
+  /* Demonstração — cor própria, nunca confundida com estado de risco */
+  --demo: #7C3AED;
+  --demo-bg: #F3EEFF;
+  --demo-border: #DDD0FB;
+
+  /* Estado do dado */
+  --stale-bg: #FEF7E6;
+  --stale-text: #8A5A00;
+  --error-bg: #FDECEC;
+  --error-text: #A61B1B;
+
+  /* Tipografia */
+  --font-display: "Manrope", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-base: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+  --fs-3xl: 40px;
+  --fs-hero: clamp(36px, 5.4vw, 64px);
+
+  /* Espaçamento (base 8 px) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* Layout */
+  --sidebar-w: 248px;
+  --header-h: 72px;
+  --content-max: 1440px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 8px 28px rgba(15, 23, 42, 0.12);
+  --focus: 0 0 0 3px rgba(21, 94, 239, 0.35);
+  --control-h: 40px;
+}

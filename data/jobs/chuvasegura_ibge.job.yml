@@ -12,35 +12,35 @@ resources:
       tasks:
         - task_key: ibge_census_tracts_landing
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/ingestion/01_ibge_census_tracts_landing
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/ingestion/01_ibge_census_tracts_landing
             source: WORKSPACE
         - task_key: ibge_census_tracts_bronze
           depends_on:
             - task_key: ibge_census_tracts_landing
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/transformations/bronze/02_ibge_census_tracts_bronze
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/transformations/bronze/02_ibge_census_tracts_bronze
             source: WORKSPACE
         - task_key: ibge_census_tracts_silver
           depends_on:
             - task_key: ibge_census_tracts_bronze
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/transformations/silver/03_ibge_census_tracts_silver
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/transformations/silver/03_ibge_census_tracts_silver
             source: WORKSPACE
         - task_key: quality_silver_ibge
           depends_on:
             - task_key: ibge_census_tracts_silver
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/quality/03_ibge_silver_quality
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/quality/03_ibge_silver_quality
             source: WORKSPACE
         - task_key: dim_ibge_census_tracts
           depends_on:
             - task_key: quality_silver_ibge
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/transformations/gold/04_dim_ibge_census_tracts
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/transformations/gold/04_dim_ibge_census_tracts
             source: WORKSPACE
         - task_key: dim_tempo
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/shared/transformations/gold/00_dim_tempo
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/transformations/gold/00_dim_tempo
             source: WORKSPACE
         - task_key: gold_ibge_census_tract_population
           depends_on:
@@ -48,13 +48,13 @@ resources:
             - task_key: dim_tempo
             - task_key: quality_silver_ibge
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/transformations/gold/05_fact_ibge_census_tract_population
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/transformations/gold/05_fact_ibge_census_tract_population
             source: WORKSPACE
         - task_key: quality_gold_ibge
           depends_on:
             - task_key: gold_ibge_census_tract_population
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/ibge/quality/05_ibge_gold_quality
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ibge/quality/05_ibge_gold_quality
             source: WORKSPACE
       queue:
         enabled: true

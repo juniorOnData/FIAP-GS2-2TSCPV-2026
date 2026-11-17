@@ -9,41 +9,41 @@ resources:
       tasks:
         - task_key: ingestion_history_flooding_events
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/ingestion/01_geosampa_history_flooding_events_bronze
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/ingestion/01_geosampa_history_flooding_events_bronze
             source: WORKSPACE
           environment_key: Default
         - task_key: ingestion_subprefecture_area
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/ingestion/01_geosampa_subprefecture_area_bronze
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/ingestion/01_geosampa_subprefecture_area_bronze
             source: WORKSPACE
         - task_key: silver_geosampa_flooding_events
           depends_on:
             - task_key: ingestion_history_flooding_events
             - task_key: ingestion_subprefecture_area
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/silver/02_geosampa_flooding_events_silver
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/transformations/silver/02_geosampa_flooding_events_silver
             source: WORKSPACE
         - task_key: quality_silver_geosampa
           depends_on:
             - task_key: silver_geosampa_flooding_events
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/quality/02_geosampa_silver_quality
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/quality/02_geosampa_silver_quality
             source: WORKSPACE
         - task_key: dim_geosampa_subprefecture_area
           depends_on:
             - task_key: ingestion_subprefecture_area
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/03_dim_geosampa_subprefecture_area
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/transformations/gold/03_dim_geosampa_subprefecture_area
             source: WORKSPACE
         - task_key: dim_geosampa_type_flooding_events
           depends_on:
             - task_key: quality_silver_geosampa
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/03_dim_geosampa_type_flooding_events
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/transformations/gold/03_dim_geosampa_type_flooding_events
             source: WORKSPACE
         - task_key: dim_tempo
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/shared/transformations/gold/00_dim_tempo
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/transformations/gold/00_dim_tempo
             source: WORKSPACE
         - task_key: gold_geosampa_flooding_events
           depends_on:
@@ -52,13 +52,13 @@ resources:
             - task_key: dim_geosampa_subprefecture_area
             - task_key: quality_silver_geosampa
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/transformations/gold/04_fact_geosampa_flooding_events
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/transformations/gold/04_fact_geosampa_flooding_events
             source: WORKSPACE
         - task_key: quality_gold_geosampa
           depends_on:
             - task_key: gold_geosampa_flooding_events
           notebook_task:
-            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/src/geosampa/quality/04_geosampa_gold_quality
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/geosampa/quality/04_geosampa_gold_quality
             source: WORKSPACE
       queue:
         enabled: true
