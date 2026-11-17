@@ -11,7 +11,9 @@
 # MAGIC    Chuva negativa é fisicamente impossível (falha do sensor ou da transmissão): `nr_valor` fica nulo e `fl_valor_invalido = true`. O valor recebido continua em `nr_valor_origem`, então nada da fonte se perde.
 # MAGIC 3. `dc_grandeza` (`Chuva` ou `Nível`) vem do tipo do sensor na própria medição ou, se faltar, do cadastro (`silver.sibh_stations`).
 # MAGIC 4. Uma linha por sensor e data e hora da medição: duplicidades são removidas, mantendo a carga mais recente da Bronze.
-# MAGIC 5. Carga incremental pela janela da Bronze (`_window`, AAAA-MM): um mês é reprocessado quando a Bronze foi carregada depois da Silver, com `replaceWhere`. Meses que saíram da Bronze saem da Silver.
+# MAGIC    A API devolve algumas medições em dois meses vizinhos (horas da virada do mês). Nesses casos a medição fica só no mês da Bronze que corresponde ao mês dela em UTC; se nenhum corresponder, no mês mais recente. Assim a Silver tem uma linha por chave distinta da Bronze, e a Gold não soma a mesma medição duas vezes.
+# MAGIC 5. Carga incremental pela janela da Bronze (`_window`, AAAA-MM): um mês é reprocessado quando a Bronze foi carregada depois da Silver, com `replaceWhere`, junto com os meses vizinhos (a escolha do mês de uma medição repetida depende deles). Meses que saíram da Bronze saem da Silver.
+# MAGIC 6. A tabela guarda a versão da transformação (`chuvasegura.versao_transformacao`). Quando o código muda de versão, o modo `pending` reprocessa todos os meses, sem precisar rodar `all` à mão.
 # MAGIC
 # MAGIC Widget `window`: `pending` (padrão: meses novos ou recarregados na Bronze), `all` ou um mês `AAAA-MM`.
 
@@ -44,6 +46,8 @@ SENSORES = "fiap_analytics.silver.sibh_stations"
 SILVER = "fiap_analytics.silver.sibh_measurements"
 GRANDEZAS = {"2": "Chuva", "1": "Nível"}
 WINDOW_ARG = dbutils.widgets.get("window").strip().lower() or "pending"
+# Aumente quando a transformação mudar de forma que exija reprocessar meses já gravados.
+VERSAO_TRANSFORMACAO = "3"  # 2: chuva negativa anulada; 3: medição repetida entre meses fica num mês só
 
 # COMMAND ----------
 
@@ -63,10 +67,30 @@ def ultima_carga_por_mes(tabela):
 bronze_meses = ultima_carga_por_mes(BRONZE)
 silver_meses = ultima_carga_por_mes(SILVER)
 
-if WINDOW_ARG == "pending":
-    meses = sorted(m for m, carga in bronze_meses.items() if silver_meses.get(m) != carga)
-elif WINDOW_ARG == "all":
+def versao_gravada():
+    if not spark.catalog.tableExists(SILVER):
+        return None
+    props = {r["key"]: r["value"] for r in spark.sql(f"SHOW TBLPROPERTIES {SILVER}").collect()}
+    return props.get("chuvasegura.versao_transformacao")
+
+
+def com_vizinhos(lista):
+    """Inclui o mês anterior e o seguinte de cada mês (se existirem na Bronze)."""
+    def desloca(mes, n):
+        a, m = map(int, mes.split("-"))
+        a, m = divmod(a * 12 + (m - 1) + n, 12)
+        return f"{a:04d}-{m + 1:02d}"
+    return sorted({v for mes in lista for v in (desloca(mes, -1), mes, desloca(mes, 1)) if v in bronze_meses})
+
+
+versao_atual = versao_gravada()
+reprocessar_tudo = WINDOW_ARG == "all" or (WINDOW_ARG == "pending" and versao_atual != VERSAO_TRANSFORMACAO)
+if reprocessar_tudo:
     meses = sorted(bronze_meses)
+    if WINDOW_ARG == "pending":
+        print(f"Versão da transformação mudou ({versao_atual} -> {VERSAO_TRANSFORMACAO}): reprocessando todos os meses.")
+elif WINDOW_ARG == "pending":
+    meses = com_vizinhos([m for m, carga in bronze_meses.items() if silver_meses.get(m) != carga])
 else:
     if WINDOW_ARG not in bronze_meses:
         raise RuntimeError(f"Mês {WINDOW_ARG} não está na Bronze")
@@ -91,11 +115,29 @@ mais_recente = Window.partitionBy("cod_sensor", "ds_date_origem").orderBy(
 tipo_cadastro = spark.table(SENSORES).select(F.col("cod_sensor").alias("_sensor"), F.col("cod_tipo_sensor").alias("_tipo_cadastro"))
 
 
+def chaves_do_mes(mes):
+    """Chaves (sensor, data e hora) cuja linha fica neste mês: o mês da Bronze igual ao mês UTC da medição;
+    se nenhum mês da Bronze corresponder, o mais recente em que ela aparece."""
+    bronze = spark.table(BRONZE).select(
+        F.col("station_prefix_id").alias("cod_sensor"), F.col("date").alias("ds_date_origem"), F.col("_window"))
+    # nomes próprios para o lado direito: as duas pontas vêm da mesma tabela (evita colunas ambíguas no self-join)
+    do_mes = bronze.filter(F.col("_window") == mes).select(
+        F.col("cod_sensor").alias("_m_sensor"), F.col("ds_date_origem").alias("_m_date")).distinct()
+    cond = F.col("cod_sensor").eqNullSafe(F.col("_m_sensor")) & F.col("ds_date_origem").eqNullSafe(F.col("_m_date"))
+    candidatos = bronze.join(do_mes, cond, "left_semi").withColumn(
+        "_mes_utc", F.date_format(texto_para_timestamp("ds_date_origem"), "yyyy-MM"))
+    escolha = candidatos.groupBy("cod_sensor", "ds_date_origem").agg(
+        F.coalesce(F.max(F.when(F.col("_window") == F.col("_mes_utc"), F.col("_window"))), F.max("_window")).alias("_mes_escolhido"))
+    return escolha.filter(F.col("_mes_escolhido") == mes).select(
+        F.col("cod_sensor").alias("_k_sensor"), F.col("ds_date_origem").alias("_k_date"))
+
+
 def grandeza(tipo):
     return F.when(tipo == "2", F.lit(GRANDEZAS["2"])).when(tipo == "1", F.lit(GRANDEZAS["1"]))
 
 
 def transformar(mes):
+    chaves = chaves_do_mes(mes)
     medicoes = (
         spark.table(BRONZE)
         .filter(F.col("_window") == mes)
@@ -119,6 +161,7 @@ def transformar(mes):
         .withColumn("_ordem", F.row_number().over(mais_recente))
         .filter("_ordem = 1")
         .drop("_ordem")
+        .join(chaves, F.col("cod_sensor").eqNullSafe(F.col("_k_sensor")) & F.col("ds_date_origem").eqNullSafe(F.col("_k_date")), "left_semi")
         .join(F.broadcast(tipo_cadastro), F.col("cod_sensor") == F.col("_sensor"), "left")
         .withColumn("cod_tipo_sensor", F.coalesce(F.col("_tipo_medicao"), F.col("_tipo_cadastro")))
         .withColumn("dc_grandeza", grandeza(F.col("cod_tipo_sensor")))
@@ -156,6 +199,10 @@ for mes in meses:
 if removidos:
     lista = ", ".join(f"'{m}'" for m in removidos)
     spark.sql(f"DELETE FROM {SILVER} WHERE _window IN ({lista})")
+
+if reprocessar_tudo and spark.catalog.tableExists(SILVER):
+    spark.sql(f"ALTER TABLE {SILVER} SET TBLPROPERTIES ('chuvasegura.versao_transformacao' = '{VERSAO_TRANSFORMACAO}')")
+    print(f"Versão da transformação gravada: {VERSAO_TRANSFORMACAO}")
 
 display(spark.sql(f"""
     SELECT _window, dc_grandeza, COUNT(*) AS medicoes, COUNT(DISTINCT cod_sensor) AS sensores,
