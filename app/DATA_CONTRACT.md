@@ -64,8 +64,15 @@ Cada arquivo é `{ "meta": {...}, "data": ... }`. Campos de `meta`:
 
 Para manter os arquivos leves, simplifique as geometrias para a escala de visualização e arredonde as coordenadas em 5 casas (cerca de 1 m).
 
-## Primeira exportação GeoSampa
+## Exportação automática
 
-A tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_web.py`) roda depois de todas as fontes. Ela confere se a qualidade Gold de cada fonte passou na mesma execução e publica `manifest.json`, `ocorrencias.json` e `subprefeituras.json` no Volume `/Volumes/fiap_analytics/gold/chuvasegura_web/`. Só entram ocorrências com data e coordenadas no envelope validado de São Paulo; o manifesto registra quantos registros foram descartados (`registros_descartados`).
+A tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_web.py`) roda depois de todas as fontes, confere se a qualidade Gold de cada uma passou **na mesma execução** e publica o pacote em `/Volumes/fiap_analytics/gold/chuvasegura_web/` e, por commit, em `app/data/gold/`. Se alguma fonte pedida falhar, nada vai ao repositório (o site mantém a versão anterior).
 
-Baixe os três arquivos do Volume para `app/data/gold/`. Depois, altere `DATA_ROOT` em `app/assets/js/config.js` para `data/gold` e publique o frontend. A aplicação usa o manifesto para sinalizar chuva, nível, suscetibilidade e outras fontes que ainda não estejam incluídas. O pacote real não inclui dados sintéticos.
+Particularidades dos dados reais:
+
+- **Estações:** `id` = `<rede>:<código>` (`cemaden:`, `sibh:`, `inmet:`). `subprefeitura` é `null`, porque a Gold não tem essa informação das estações; o filtro por subprefeitura não as inclui. Só entram estações com coordenadas no envelope do município e que estejam ativas ou tenham leitura.
+- **Chuva diária** (de 2020-01-01 até o dia de `meta.referencia`): soma das horas no fuso de São Paulo; dia sem leitura é `null`, nunca zero. Estação com mais de um sensor (CEMADEN): vale o maior valor de cada hora.
+- **Chuva horária:** últimas 168 horas; `meta.referencia` é a última hora com leitura em qualquer rede.
+- **Nível:** média por hora (7 dias) e média diária (365 dias), na unidade da fonte (`meta.unidade`).
+- **Manifesto:** cada conjunto traz `sha256_dados`, usado para só gerar commit quando os dados mudam. `nao_publicados` lista o motivo de cada conjunto ausente, inclusive falhas da execução.
+- **Ocorrências:** descartadas as sem data ou fora do envelope (`registros_descartados`). `grau_susc_inundacao` é `null` até o cruzamento com o SGB ser publicado (nulo = "não cruzado").

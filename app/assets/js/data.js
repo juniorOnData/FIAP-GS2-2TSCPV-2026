@@ -9,10 +9,18 @@ let manifest = null;
 
 export async function loadManifest() {
   if (manifest) return manifest;
-  const res = await fetch(`${CONFIG.DATA_ROOT}/manifest.json`, { cache: "no-cache" });
-  if (!res.ok) throw new Error(`manifest.json respondeu ${res.status}`);
-  manifest = await res.json();
-  return manifest;
+  // Só o 404 (pasta ainda não publicada) cai para a próxima; qualquer outro erro é mostrado, para não
+  // trocar dados reais por demonstração em silêncio durante uma falha. O banner de demonstração é permanente.
+  let ultimo = null;
+  for (const root of CONFIG.DATA_ROOTS) {
+    const res = await fetch(`${root}/manifest.json`, { cache: "no-cache" });
+    if (res.status === 404) { ultimo = `${root}/manifest.json não existe`; continue; }
+    if (!res.ok) throw new Error(`${root}/manifest.json respondeu ${res.status}`);
+    CONFIG.DATA_ROOT = root;
+    manifest = await res.json();
+    return manifest;
+  }
+  throw new Error(ultimo || "nenhum manifest.json encontrado");
 }
 export const getManifest = () => manifest;
 export const isDemo = () => manifest?.modo === "demo";
