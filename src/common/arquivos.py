@@ -53,9 +53,14 @@ def _requisitar(metodo, url, cabecalhos=None, stream=False, permitir=(200,)):
     raise RuntimeError(f"{url} falhou após {TENTATIVAS} tentativas: {ultimo}")
 
 
-def metadados_remotos(url):
-    """{'url_final', 'tamanho', 'ultima_modificacao', 'etag', 'aceita_range'} do arquivo, via HEAD."""
-    r = _requisitar("HEAD", url)
+def metadados_remotos(url, ausente_ok=False):
+    """{'url_final', 'tamanho', 'ultima_modificacao', 'etag', 'aceita_range'} do arquivo, via HEAD.
+
+    Com `ausente_ok=True`, devolve None quando o servidor responde 404 (arquivo ainda não publicado).
+    """
+    r = _requisitar("HEAD", url, permitir=(200, 404) if ausente_ok else (200,))
+    if r.status_code == 404:
+        return None
     tamanho = r.headers.get("Content-Length")
     return {
         "url_final": r.url,
