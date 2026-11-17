@@ -7,6 +7,7 @@ Pipeline de dados em Databricks que junta **chuva**, **nível de rios e córrego
 | **CEMADEN** (API PED) | Cadastro de estações e leituras de chuva da rede CEMADEN | Login na SGAA (token) |
 | **SIBH / SP Águas** | Cadastro de estações e medições de chuva e nível das demais instituições (SP Águas, SAISP, SABESP…) | API pública |
 | **GeoSampa** | Ocorrências de alagamento, deslizamento, inundação e queda de árvore, além das subprefeituras | Arquivos baixados e enviados ao volume |
+| **SGB / CPRM** | Carta de suscetibilidade a movimentos de massa e inundações do município (IPT/CPRM, 2015): áreas de suscetibilidade, bacias contribuintes e padrões de relevo | Download público (RIGEO) |
 
 ## Arquitetura
 
@@ -19,8 +20,9 @@ flowchart LR
     SIBH[SIBH api/v2]
   end
   GPKG[Arquivos GeoSampa]
+  PUB[Downloads públicos<br/>SGB]
   subgraph bronze
-    VOL[(Volumes: arquivos brutos<br/>JSON gzip / GPKG)]
+    VOL[(Volumes: arquivos brutos<br/>JSON gzip / GPKG / shapefile)]
     BT[Tabelas Bronze<br/>tudo em string]
     LOG[(Logs por origem)]
   end
@@ -33,13 +35,14 @@ flowchart LR
   PED -- landing --> VOL
   SIBH -- landing --> VOL
   GPKG -- upload --> VOL
+  PUB -- landing --> VOL
   VOL -- bronze --> BT
   BT --> ST --> GT
   VOL -.-> LOG
   BT -.-> LOG
 ```
 
-- **Landing:** baixa das APIs e grava os arquivos no volume, exatamente como vieram, com um manifesto de controle (contagem e SHA256).
+- **Landing:** baixa das APIs e dos portais e grava os arquivos no volume, exatamente como vieram, com um manifesto de controle (contagem e SHA256). Dos pacotes grandes (o da carta do SGB tem quase 1 GB), só os arquivos usados são lidos, por requisições HTTP Range.
 - **Bronze:** carrega os arquivos em tabelas Delta, com todas as colunas como texto e colunas de controle (`_source_file`, `_batch_id`, `_ingested_at`...). Campos novos da API vão para `_rescued_data`.
 - **Silver:** dados tipados, padronizados e relacionados.
 - **Gold:** modelo dimensional para análise.
@@ -51,6 +54,7 @@ Situação atual:
 | CEMADEN | ✅ | ✅ | ✅ | ✅ |
 | SIBH | ✅ | ✅ | ✅ | ✅ |
 | GeoSampa | ✅ | ✅ | ✅ | ✅ |
+| SGB | ✅ | ✅ | ✅ | ✅ |
 
 ## Estrutura do repositório
 
@@ -60,11 +64,14 @@ O número no início de cada arquivo indica a ordem de execução dentro da font
 jobs/                                             # definição dos jobs do Databricks (YAML)
 ├── chuvasegura_cemaden.job.yml
 ├── chuvasegura_geosampa.job.yml
+├── chuvasegura_sgb.job.yml
 └── chuvasegura_sibh.job.yml
 src/
 ├── common/
+│   ├── arquivos.py                               # downloads com novas tentativas e extração de zips remotos (HTTP Range)
 │   ├── conversoes.py                             # conversões de texto (datas, números, fuso) usadas nas Silvers
 │   ├── data_quality.py                           # regras e execução das etapas de qualidade de dados
+│   ├── geo.py                                    # shapefile, GeoPackage, WKB, UTM 23S <-> lat/lon, área e centroide
 │   └── ingestion_log.py                          # log de ingestão padrão (módulo Python)
 ├── shared/
 │   └── transformations/gold/
@@ -104,20 +111,34 @@ src/
 │           ├── 06_dim_sibh_sensors.sql
 │           ├── 07_fact_sibh_rainfall_hourly.sql
 │           └── 07_fact_sibh_level_hourly.sql
-└── geosampa/
+├── geosampa/
+│   ├── ingestion/
+│   │   ├── 01_geosampa_subprefecture_area_bronze.sql
+│   │   └── 01_geosampa_history_flooding_events_bronze.py
+│   ├── quality/
+│   │   ├── 02_geosampa_silver_quality.py
+│   │   └── 04_geosampa_gold_quality.py
+│   └── transformations/
+│       ├── silver/
+│       │   └── 02_geosampa_flooding_events_silver.sql
+│       └── gold/
+│           ├── 03_dim_geosampa_subprefecture_area.sql
+│           ├── 03_dim_geosampa_type_flooding_events.sql
+│           └── 04_fact_geosampa_flooding_events.sql
+└── sgb/
     ├── ingestion/
-    │   ├── 01_geosampa_subprefecture_area_bronze.sql
-    │   └── 01_geosampa_history_flooding_events_bronze.py
+    │   └── 01_sgb_susceptibility_landing.py
     ├── quality/
-    │   ├── 02_geosampa_silver_quality.py
-    │   └── 04_geosampa_gold_quality.py
+    │   ├── 03_sgb_silver_quality.py
+    │   └── 05_sgb_gold_quality.py
     └── transformations/
+        ├── bronze/
+        │   └── 02_sgb_susceptibility_bronze.py
         ├── silver/
-        │   └── 02_geosampa_flooding_events_silver.sql
+        │   └── 03_sgb_susceptibility_areas_silver.py
         └── gold/
-            ├── 03_dim_geosampa_subprefecture_area.sql
-            ├── 03_dim_geosampa_type_flooding_events.sql
-            └── 04_fact_geosampa_flooding_events.sql
+            ├── 04_dim_sgb_susceptibility_class.sql
+            └── 05_dim_sgb_susceptibility_areas.sql
 ```
 
 Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` começando com `Databricks notebook source`). O Databricks os abre como notebooks normais, com as células separadas.
@@ -226,7 +247,27 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - Um arquivo por ano no volume. Para corrigir um ano, troque o arquivo no volume pela versão nova e rode o job: a carga grava a versão nova e remove as linhas da anterior. Se houver dois arquivos do mesmo ano, a carga para e pede para deixar só um.
 - A Silver converte a geometria (POINT ou POINT Z em WKB, conforme o ano do arquivo; SIRGAS 2000 / UTM 23S, EPSG 31983) em coordenadas UTM e em latitude e longitude. A conversão é uma UDF Python registrada no próprio notebook, e a última célula confere quantos pontos ficaram sem coordenada ou fora da área de São Paulo.
 - A Gold recarrega só os anos de origem novos ou alterados.
-- **Modelo da Gold:** estrela com a fato `fact_geosampa_flooding_events` e as dimensões `dim_tempo`, `dim_geosampa_type_flooding_events` e `dim_geosampa_subprefecture_area`. Cada ocorrência é identificada por `NUM_ANO_ORIGEM` + `NUM_ID_OCORRENCIA` (número da ocorrência no arquivo do ano; no arquivo de 2026 ele vem na coluna `primaryindex`). Tipo ou subprefeitura não encontrados vão para o membro `-1` (não informado), então a fato nunca tem chave nula. As chaves estrangeiras são declaradas (informativas no Unity Catalog) e a fato usa liquid clustering por data e subprefeitura.
+- **Modelo da Gold (GeoSampa):** estrela com a fato `fact_geosampa_flooding_events` e as dimensões `dim_tempo`, `dim_geosampa_type_flooding_events` e `dim_geosampa_subprefecture_area`. Cada ocorrência é identificada por `NUM_ANO_ORIGEM` + `NUM_ID_OCORRENCIA` (número da ocorrência no arquivo do ano; no arquivo de 2026 ele vem na coluna `primaryindex`). Tipo ou subprefeitura não encontrados vão para o membro `-1` (não informado), então a fato nunca tem chave nula. As chaves estrangeiras são declaradas (informativas no Unity Catalog) e a fato usa liquid clustering por data e subprefeitura.
+
+### SGB (carta de suscetibilidade)
+
+| # | Notebook | Widgets |
+|---|---|---|
+| 1 | `01_sgb_susceptibility_landing` | `url` (pacote SIG da carta no RIGEO); `forcar`: `nao`/`sim` |
+| 2 | `02_sgb_susceptibility_bronze` | `recarregar`: `nao`/`sim` |
+| 3 | `03_sgb_susceptibility_areas_silver` | (sem widgets: recria a Silver a partir da Bronze) |
+| 3 | `03_sgb_silver_quality` (pasta `quality/`) | (sem widgets) |
+| 4 | `04_dim_sgb_susceptibility_class` | (sem widgets) |
+| 5 | `05_dim_sgb_susceptibility_areas` | (sem widgets) |
+| 5 | `05_sgb_gold_quality` (pasta `quality/`) | (sem widgets) |
+
+- **Fonte:** *Carta de suscetibilidade a movimentos gravitacionais de massa e inundações: município de São Paulo - SP* (IPT/CPRM, 2015, escala 1:75.000), [registro no RIGEO](https://rigeo.sgb.gov.br/handle/doc/15216). O pacote SIG tem cerca de 970 MB, quase tudo fotos de campo. A landing lê do zip publicado só a pasta `12.Suscetibilidade` e a `04.PadrõesDeRelevo` (cerca de 30 MB) e grava esses arquivos, sem alteração, num zip por versão.
+- **Carta estática:** se o pacote não mudou no RIGEO (mesmo ETag, tamanho e data), a landing não baixa nada e registra `SEM_DADOS`, e a Bronze não recarrega.
+- **Camadas** (`cd_camada`): `inundacao` (1.166 polígonos), `bacia_inundacao` (802 bacias de drenagem que contribuem para as inundações; vão além do município, por todo o Alto Tietê), `enxurrada` (37), `movimento_massa` (2.370), `corrida_massa` (6) e `relevo` (211 polígonos de padrões de relevo). Classes `Alta`, `Média` e `Baixa` (grau 3, 2 e 1); enxurrada e corrida de massa não têm graduação.
+- **Geometria:** a fonte está em SIRGAS 2000 / UTM 23S (EPSG 31983). A Silver grava a geometria em SIRGAS 2000 geográfico (EPSG 4674, longitude e latitude), o padrão das fontes geoespaciais do projeto, e calcula em UTM a área, o centroide e o envelope. As conversões estão em `src/common/geo.py`, em Python puro, e rodam no driver. A área calculada bate com a `Shape_Area` da fonte com diferença abaixo de 10⁻¹¹.
+- **Declividade e relevo:** a declividade de cada classe (por exemplo, inundação Alta em declividades abaixo de 2° e movimento de massa Alta acima de 25°) e as características predominantes vêm dos quadros-síntese da carta, transcritos na dimensão de classes. O relevo entra como camada própria. O modelo digital de elevação e a declividade em raster ficam fora do projeto.
+- **Áreas publicadas:** no movimento de massa, a soma dos polígonos de cada classe bate com o quadro-síntese (100,1, 231,2 e 1.196,2 km²). Na inundação, a soma (69,3, 88,0 e 138,8 km²) passa da área do quadro (52,0, 66,2 e 113,1 km²). A diferença está no próprio arquivo, por isso a qualidade compara com a `Shape_Area`.
+- **Modelo da Gold (SGB):** `dim_sgb_susceptibility_class` (camada e classe, com grau, declividade, características e área do quadro-síntese) e `dim_sgb_susceptibility_areas` (dimensão espacial, uma linha por polígono, com a classe, a área, o centroide, o envelope e a geometria). As duas têm o membro `-1`. As áreas são a referência para o cruzamento com as ocorrências do GeoSampa: uma ocorrência pode cair em mais de uma área da mesma camada, e nesse caso vale o maior grau.
 
 ## Jobs e workflows
 
@@ -237,6 +278,7 @@ Cada fonte tem um job, e a definição de cada um fica em `jobs/`, no formato YA
 | `jobs/chuvasegura_geosampa.job.yml` | `ChuvaSegura` | todo dia às 09:00:30 | ativo |
 | `jobs/chuvasegura_cemaden.job.yml` | `ChuvaSegura - CEMADEN` | todo dia às 07:00 | ativo |
 | `jobs/chuvasegura_sibh.job.yml` | `ChuvaSegura - SIBH` | todo dia às 07:30 | ativo |
+| `jobs/chuvasegura_sgb.job.yml` | `ChuvaSegura - SGB` | dia 1 de cada mês às 06:00 | ativo |
 
 ```mermaid
 flowchart LR
@@ -280,11 +322,17 @@ flowchart LR
     T0[00_dim_tempo] --> G6
     G6 --> Q2{{04_geosampa_gold_quality}}
   end
+  subgraph sgb["ChuvaSegura - SGB"]
+    B1[01_sgb_susceptibility_landing] --> B2[02_sgb_susceptibility_bronze] --> B3[03_sgb_susceptibility_areas_silver]
+    B3 --> BQ1{{03_sgb_silver_quality}}
+    BQ1 --> B4[04_dim_sgb_susceptibility_class] --> B5[05_dim_sgb_susceptibility_areas]
+    B5 --> BQ2{{05_sgb_gold_quality}}
+  end
 ```
 
 Todos os jobs:
 - rodam em compute serverless (ambiente 6), com fila habilitada;
-- apontam para os notebooks no Git folder `/Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026`. Se o repositório estiver clonado em outro lugar, troque esse prefixo nos três arquivos.
+- apontam para os notebooks no Git folder `/Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026`. Se o repositório estiver clonado em outro lugar, troque esse prefixo em todos os arquivos de `jobs/`.
 
 **Antes de ativar CEMADEN e SIBH:**
 1. Rode uma vez, manualmente, a carga do histórico com o modo `backfill`:
@@ -309,6 +357,7 @@ Cada origem tem a sua tabela de log, todas no mesmo formato, definido em `src/co
 - `fiap_analytics.bronze.cemaden_ingestion_log`
 - `fiap_analytics.bronze.sibh_ingestion_log`
 - `fiap_analytics.bronze.geosampa_ingestion_log`
+- `fiap_analytics.bronze.sgb_ingestion_log`
 
 Colunas: `batch_id, fonte, etapa, janela, status, registros, paginas, duplicados, arquivo, sha256, duracao_s, iniciado_em, finalizado_em, mensagem`.
 
@@ -343,7 +392,7 @@ As etapas de qualidade usam o módulo `src/common/data_quality.py` e rodam como 
   - `AVISO`: só registra.
 - **Regra que não consegue rodar** (tabela inexistente, SQL inválido) conta como falha, nunca como sucesso.
 - **Regras prontas:** `nao_vazia`, `nao_nulo`, `condicao` (expressão verdadeira nas linhas que violam a regra), `unico`, `existe_em` (integridade referencial) e `consulta` (SQL livre).
-- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log` e `fiap_analytics.bronze.sibh_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
+- **Resultados:** ficam na tabela de qualidade de cada origem (`fiap_analytics.bronze.geosampa_data_quality_log`, `fiap_analytics.bronze.cemaden_data_quality_log`, `fiap_analytics.bronze.sibh_data_quality_log` e `fiap_analytics.bronze.sgb_data_quality_log`), uma linha por regra e execução, com tabela, regra, severidade, status (`SUCESSO`/`FALHA`), falhas, total, percentual e limite.
 
 Regras do GeoSampa:
 
@@ -365,6 +414,13 @@ Regras do SIBH:
 |---|---|---|
 | Silver | sensores: tabela não vazia, sensor único, grandeza, latitude e longitude preenchidas e dentro da área de São Paulo; medições: tabela não vazia, uma linha por chave distinta da Bronze, sensor, grandeza e data e hora preenchidos, data entre 2010 e agora, chuva não negativa | mais de 1% das medições com data e hora fora do mês pedido à API (confere a premissa de UTC); mais de 1% sem valor; chuva acima de 50 mm numa medição; mais de 1% de medições de sensores fora do cadastro |
 | Gold | as duas fatos não vazias, com uma linha por sensor, dia e hora, medições iguais às da Silver em cada mês e chaves existentes na `dim_tempo` e na dimensão de sensores; chuva igual à da Silver em cada mês e não negativa; nível mínimo, médio e máximo coerentes; chaves únicas e membro `-1` na dimensão | mais de 1% das horas com sensor `-1`; horas de chuva acima de 120 mm; sensor de chuva na fato de nível |
+
+Regras do SGB:
+
+| Etapa | ERRO (para o job) | AVISO (só registra) |
+|---|---|---|
+| Silver | tabela não vazia; mesmas feições da Bronze; as seis camadas presentes; feição única na camada; classe preenchida e, nas camadas graduadas, Alta, Média ou Baixa; geometria de origem em EPSG 31983 e preenchida; área maior que zero e igual à `Shape_Area` da fonte (0,01%); feições dentro da área de São Paulo (menos as bacias contribuintes); movimento de massa e relevo cobrindo a área do município (2%) | camada desconhecida; área de cada classe de movimento de massa diferente do quadro-síntese (1%) |
+| Gold | dimensões não vazias; chaves únicas e membro `-1`; grau coerente com a classe; áreas e feições iguais às da Silver em cada camada; classe existente na dimensão de classes e nenhuma área com classe `-1`; geometria preenchida; centroide dentro do envelope | classe graduada sem características do quadro-síntese |
 
 Para incluir uma regra, acrescente-a à lista `regras` do notebook da etapa. Exemplo de consulta aos resultados:
 
@@ -388,10 +444,13 @@ ORDER BY executado_em DESC;
 | bronze | `geosampa_data_quality_log` | Resultados das regras de qualidade do GeoSampa |
 | bronze | `cemaden_data_quality_log` | Resultados das regras de qualidade do CEMADEN |
 | bronze | `sibh_data_quality_log` | Resultados das regras de qualidade do SIBH |
+| bronze | `sgb_susceptibility_areas` | Feições da carta de suscetibilidade do SGB, uma linha por feição de cada camada, com a geometria em WKB (EPSG 31983) |
+| bronze | `sgb_data_quality_log` | Resultados das regras de qualidade do SGB |
 | silver | `sibh_stations` | Sensores de chuva e nível do SIBH na capital, uma linha por sensor, tipados |
 | silver | `sibh_measurements` | Medições de chuva e nível tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
 | silver | `cemaden_stations` | Estações do CEMADEN no município, uma linha por estação, tipadas |
 | silver | `cemaden_rainfall_readings` | Leituras de chuva tipadas e sem duplicidade, com data e hora em UTC e dia e hora no fuso de São Paulo |
+| silver | `sgb_susceptibility_areas` | Áreas da carta de suscetibilidade, com camada e classe padronizadas, geometria em EPSG 4674, área, centroide e envelope |
 | silver | `geosampa_flooding_events` | Ocorrências com identificador (`nr_id_ocorrencia`), data, tipo e subprefeitura padronizados e localização (`nr_x_utm`, `nr_y_utm`, `nr_latitude`, `nr_longitude`, `geom_wkb`) |
 | gold | `dim_tempo` | Dimensão de tempo diária, compartilhada por todas as fatos |
 | gold | `dim_cemaden_stations` | Dimensão de estações do CEMADEN, com o membro `-1` (não informado) |
@@ -402,10 +461,12 @@ ORDER BY executado_em DESC;
 | gold | `dim_geosampa_subprefecture_area` | Dimensão de subprefeituras, com o membro `-1` (não informado) |
 | gold | `dim_geosampa_type_flooding_events` | Dimensão de tipos de ocorrência, com o membro `-1` (não informado) |
 | gold | `fact_geosampa_flooding_events` | Fato de ocorrências (uma linha por ocorrência) por data, tipo e subprefeitura, com latitude e longitude |
+| gold | `dim_sgb_susceptibility_class` | Dimensão de classes da carta do SGB (camada e classe, com grau, declividade e características do quadro-síntese), com o membro `-1` |
+| gold | `dim_sgb_susceptibility_areas` | Dimensão espacial das áreas da carta do SGB, uma linha por polígono, com classe, área, centroide, envelope e geometria |
 
 ## Desenvolvimento
 
-- **Módulos de `src/common`:** depois de alterar `ingestion_log.py`, `data_quality.py` ou `conversoes.py`, reinicie o Python do notebook (*Run → Restart Python*) para recarregar o módulo.
+- **Módulos de `src/common`:** depois de alterar `ingestion_log.py`, `data_quality.py`, `conversoes.py`, `geo.py` ou `arquivos.py`, reinicie o Python do notebook (*Run → Restart Python*) para recarregar o módulo.
 - **Fluxo de trabalho:** cada mudança vai numa branch própria e entra na `main` por pull request.
 
 ## Próximos passos
@@ -417,3 +478,4 @@ ORDER BY executado_em DESC;
 - **CEMADEN:** dados da rede observacional do Centro Nacional de Monitoramento e Alertas de Desastres Naturais (CEMADEN/MCTI), via API PED.
 - **SIBH:** Sistema de Informações Hidrológicas, Agência de Águas do Estado de São Paulo (SP Águas).
 - **GeoSampa:** Prefeitura de São Paulo. Subprefeituras conforme o Anexo IX (ata 41/14).
+- **SGB:** Serviço Geológico do Brasil (SGB/CPRM) e Instituto de Pesquisas Tecnológicas (IPT). *Carta de suscetibilidade a movimentos gravitacionais de massa e inundações: município de São Paulo - SP*, 2015, escala 1:75.000. Disponível no RIGEO.
