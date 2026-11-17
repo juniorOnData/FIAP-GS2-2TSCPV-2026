@@ -8,6 +8,7 @@
 # MAGIC
 # MAGIC 1. `date` da fonte está em UTC (texto `AAAA/MM/DD HH:mm`, conforme a Bronze). Vira `dt_hr_medicao_utc` e, no fuso de São Paulo, `dt_medicao`, `nr_hora` e `cod_dim_data` (chave da `dim_tempo`).
 # MAGIC 2. `value` vira `nr_valor`: chuva em mm no intervalo da medição para sensores de chuva; nível na unidade da fonte para sensores de nível. `read_value` é mantido como `nr_valor_lido`.
+# MAGIC    Chuva negativa é fisicamente impossível (falha do sensor ou da transmissão): `nr_valor` fica nulo e `fl_valor_invalido = true`. O valor recebido continua em `nr_valor_origem`, então nada da fonte se perde.
 # MAGIC 3. `dc_grandeza` (`Chuva` ou `Nível`) vem do tipo do sensor na própria medição ou, se faltar, do cadastro (`silver.sibh_stations`).
 # MAGIC 4. Uma linha por sensor e data e hora da medição: duplicidades são removidas, mantendo a carga mais recente da Bronze.
 # MAGIC 5. Carga incremental pela janela da Bronze (`_window`, AAAA-MM): um mês é reprocessado quando a Bronze foi carregada depois da Silver, com `replaceWhere`. Meses que saíram da Bronze saem da Silver.
@@ -103,7 +104,7 @@ def transformar(mes):
             F.col("measurement_id").alias("cod_medicao"),
             F.col("station_type_id").alias("_tipo_medicao"),
             texto_para_timestamp("date").alias("dt_hr_medicao_utc"),
-            texto_para_double("value").alias("nr_valor"),
+            texto_para_double("value").alias("nr_valor_origem"),
             texto_para_double("read_value").alias("nr_valor_lido"),
             F.col("measurement_classification_type_id").alias("cd_classificacao"),
             F.col("date").alias("ds_date_origem"),
@@ -121,11 +122,14 @@ def transformar(mes):
         .join(F.broadcast(tipo_cadastro), F.col("cod_sensor") == F.col("_sensor"), "left")
         .withColumn("cod_tipo_sensor", F.coalesce(F.col("_tipo_medicao"), F.col("_tipo_cadastro")))
         .withColumn("dc_grandeza", grandeza(F.col("cod_tipo_sensor")))
+        .withColumn("fl_valor_invalido", (F.col("dc_grandeza") == "Chuva") & (F.col("nr_valor_origem") < 0))
+        .withColumn("nr_valor", F.when(F.col("fl_valor_invalido"), F.lit(None).cast("double")).otherwise(F.col("nr_valor_origem")))
         .withColumn("dt_medicao", data_local(F.col("dt_hr_medicao_utc")))
         .withColumn("nr_hora", hora_local(F.col("dt_hr_medicao_utc")))
         .withColumn("cod_dim_data", cod_dim_tempo(F.col("dt_medicao")))
         .select("cod_sensor", "cod_medicao", "cod_tipo_sensor", "dc_grandeza", "dt_hr_medicao_utc", "dt_medicao",
-                "nr_hora", "cod_dim_data", "nr_valor", "nr_valor_lido", "cd_classificacao", "ds_date_origem",
+                "nr_hora", "cod_dim_data", "nr_valor", "nr_valor_origem", "fl_valor_invalido", "nr_valor_lido",
+                "cd_classificacao", "ds_date_origem",
                 "_window", "_window_year", "_source_file", "_ingested_at")
     )
 
@@ -146,7 +150,7 @@ for mes in meses:
             'Silver das medições de chuva e nível do SIBH (SP Águas) na capital: uma linha por sensor e data e hora da medição. dt_hr_medicao_utc em UTC; dt_medicao e nr_hora no fuso de São Paulo. Uma fatia por mês da Bronze (_window).'
         """)
     else:
-        writer.option("replaceWhere", f"_window = '{mes}'").saveAsTable(SILVER)
+        writer.option("replaceWhere", f"_window = '{mes}'").option("mergeSchema", "true").saveAsTable(SILVER)
     print(f"{mes}: {spark.table(SILVER).filter(F.col('_window') == mes).count()} medições")
 
 if removidos:
@@ -155,7 +159,8 @@ if removidos:
 
 display(spark.sql(f"""
     SELECT _window, dc_grandeza, COUNT(*) AS medicoes, COUNT(DISTINCT cod_sensor) AS sensores,
-           COUNT_IF(dt_hr_medicao_utc IS NULL) AS sem_data_hora, COUNT_IF(nr_valor IS NULL) AS sem_valor
+           COUNT_IF(dt_hr_medicao_utc IS NULL) AS sem_data_hora, COUNT_IF(nr_valor IS NULL) AS sem_valor,
+           COUNT_IF(fl_valor_invalido) AS valor_invalido
     FROM {SILVER}
     GROUP BY ALL
     ORDER BY _window DESC, dc_grandeza

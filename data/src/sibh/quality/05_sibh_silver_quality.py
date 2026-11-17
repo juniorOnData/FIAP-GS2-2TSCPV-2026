@@ -77,8 +77,10 @@ regras = [
 
     # Medições: valor
     nao_nulo(MEDICOES, "nr_valor", severidade="AVISO", limite=0.01),
-    condicao("chuva_nao_negativa", MEDICOES, "Chuva maior ou igual a zero",
+    condicao("chuva_nao_negativa", MEDICOES, "Chuva maior ou igual a zero (negativos da fonte ficam nulos na Silver)",
              "dc_grandeza = 'Chuva' AND nr_valor < 0"),
+    condicao("chuva_negativa_na_fonte", MEDICOES, "Medições de chuva recebidas com valor negativo (anuladas na Silver; original em nr_valor_origem)",
+             "fl_valor_invalido", severidade="AVISO", limite=0.0001),
     condicao("chuva_acima_de_50mm", MEDICOES, "Medições de chuva com mais de 50 mm (valor fora do comum para uma medição)",
              "dc_grandeza = 'Chuva' AND nr_valor > 50", severidade="AVISO", limite=0.0001),
 
