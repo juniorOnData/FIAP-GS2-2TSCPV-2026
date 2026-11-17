@@ -277,8 +277,10 @@ Os passos são sequenciais, porque a coleta das medições usa o cadastro da Bro
 - Os sensores do CEMADEN ficam de fora do SIBH por padrão, porque já vêm pela PED.
 - O modo `probe` faz duas chamadas de teste e mostra a resposta da API sem gravar nada.
 - **Silver dos sensores:** uma linha por sensor (`id` do cadastro). No SIBH, chuva e nível de um mesmo local têm `id` diferentes e o mesmo `cod_estacao`. Só a capital e os tipos 2 (`Chuva`) e 1 (`Nível`), com a versão do snapshot mais recente em que o sensor aparece.
-- **Silver das medições:** `date` da fonte está em UTC e vira `dt_hr_medicao_utc`; `dt_medicao`, `nr_hora` e `cod_dim_data` ficam no fuso de São Paulo. `value` vira `nr_valor` (chuva em mm por medição, ou nível na unidade da fonte), e `dc_grandeza` diz qual dos dois é. Chuva negativa (falha do sensor) fica com `nr_valor` nulo e `fl_valor_invalido = true`; o valor recebido continua em `nr_valor_origem`. Medições duplicadas (mesmo sensor e data e hora) ficam uma só.
+- **Silver das medições:** `date` da fonte está em UTC e vira `dt_hr_medicao_utc`; `dt_medicao`, `nr_hora` e `cod_dim_data` ficam no fuso de São Paulo. `value` vira `nr_valor` (chuva em mm por medição, ou nível na unidade da fonte), e `dc_grandeza` diz qual dos dois é. Chuva negativa (falha do sensor) fica com `nr_valor` nulo e `fl_valor_invalido = true`; o valor recebido continua em `nr_valor_origem`. Medições duplicadas (mesmo sensor e data e hora) ficam uma só, inclusive entre meses: a API devolve as primeiras horas do mês seguinte junto com o mês pedido, e a medição fica só no mês da Bronze igual ao mês dela em UTC. Um mês reprocessado leva junto os vizinhos.
 - **Gold:** uma dimensão de sensores e duas fatos por sensor, dia e hora (fuso de São Paulo): `fact_sibh_rainfall_hourly` (chuva somada, maior medição e número de medições) e `fact_sibh_level_hourly` (nível médio, mínimo, máximo e último da hora). As duas têm carga incremental por mês.
+
+**Versão da transformação (Silvers do CEMADEN e do SIBH):** cada Silver guarda `chuvasegura.versao_transformacao` nas propriedades da tabela. Quando o código muda de versão, o modo `pending` dos jobs reprocessa todos os meses sozinho; não é preciso rodar `window = all` à mão.
 
 ### Dimensão de tempo (compartilhada)
 

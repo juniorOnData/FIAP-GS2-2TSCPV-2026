@@ -11,6 +11,7 @@
 # MAGIC 3. Uma linha por estação, sensor e data e hora da leitura: duplicidades da fonte são removidas, mantendo a carga mais recente da Bronze.
 # MAGIC 4. Carga incremental pela janela da Bronze (`_window`, AAAAMM): um mês é reprocessado quando a Bronze foi carregada depois da Silver. A fatia do mês é substituída com `replaceWhere`. Meses que saíram da Bronze saem da Silver.
 # MAGIC 5. Linhas cuja data e hora ou valor não convertem ficam com nulo e são apontadas pela etapa de qualidade.
+# MAGIC 6. A tabela guarda a versão da transformação (`chuvasegura.versao_transformacao`). Quando o código muda de versão, o modo `pending` reprocessa todos os meses, sem precisar rodar `all` à mão.
 # MAGIC
 # MAGIC Widget `window`: `pending` (padrão: meses novos ou recarregados na Bronze), `all` ou um mês `AAAAMM`.
 
@@ -41,6 +42,8 @@ spark.conf.set("spark.sql.session.timeZone", "UTC")  # datahora da fonte está e
 BRONZE = "fiap_analytics.bronze.cemaden_rainfall_readings"
 SILVER = "fiap_analytics.silver.cemaden_rainfall_readings"
 WINDOW_ARG = dbutils.widgets.get("window").strip().lower() or "pending"
+# Aumente quando a transformação mudar de forma que exija reprocessar meses já gravados.
+VERSAO_TRANSFORMACAO = "2"  # 2: chuva negativa anulada (nr_chuva_mm_origem, fl_valor_invalido)
 
 # COMMAND ----------
 
@@ -60,10 +63,21 @@ def ultima_carga_por_mes(tabela):
 bronze_meses = ultima_carga_por_mes(BRONZE)
 silver_meses = ultima_carga_por_mes(SILVER)
 
-if WINDOW_ARG == "pending":
-    meses = sorted(m for m, carga in bronze_meses.items() if silver_meses.get(m) != carga)
-elif WINDOW_ARG == "all":
+def versao_gravada():
+    if not spark.catalog.tableExists(SILVER):
+        return None
+    props = {r["key"]: r["value"] for r in spark.sql(f"SHOW TBLPROPERTIES {SILVER}").collect()}
+    return props.get("chuvasegura.versao_transformacao")
+
+
+versao_atual = versao_gravada()
+reprocessar_tudo = WINDOW_ARG == "all" or (WINDOW_ARG == "pending" and versao_atual != VERSAO_TRANSFORMACAO)
+if reprocessar_tudo:
     meses = sorted(bronze_meses)
+    if WINDOW_ARG == "pending":
+        print(f"Versão da transformação mudou ({versao_atual} -> {VERSAO_TRANSFORMACAO}): reprocessando todos os meses.")
+elif WINDOW_ARG == "pending":
+    meses = sorted(m for m, carga in bronze_meses.items() if silver_meses.get(m) != carga)
 else:
     if WINDOW_ARG not in bronze_meses:
         raise RuntimeError(f"Mês {WINDOW_ARG} não está na Bronze")
@@ -142,6 +156,10 @@ for mes in meses:
 if removidos:
     lista = ", ".join(f"'{m}'" for m in removidos)
     spark.sql(f"DELETE FROM {SILVER} WHERE _window IN ({lista})")
+
+if reprocessar_tudo and spark.catalog.tableExists(SILVER):
+    spark.sql(f"ALTER TABLE {SILVER} SET TBLPROPERTIES ('chuvasegura.versao_transformacao' = '{VERSAO_TRANSFORMACAO}')")
+    print(f"Versão da transformação gravada: {VERSAO_TRANSFORMACAO}")
 
 display(spark.sql(f"""
     SELECT _window, COUNT(*) AS leituras, COUNT(DISTINCT cod_estacao) AS estacoes,
