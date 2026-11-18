@@ -70,7 +70,7 @@ resources:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/shared/export/01_export_web
             base_parameters:
               inicio_execucao: "{{job.start_time.iso_datetime}}"
-              fontes: "geosampa,cemaden,sibh,inmet"  # tire "inmet" antes do backfill dele
+              fontes: "geosampa,cemaden,sibh,inmet,sgb,ibge,osm"  # tire "inmet" antes do backfill dele
               github_publicar: "sim"
               github_repo: juniorOnData/FIAP-GS2-2TSCPV-2026
               github_branch: main

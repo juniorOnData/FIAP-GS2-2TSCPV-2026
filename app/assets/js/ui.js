@@ -23,6 +23,7 @@ const NATUREZA = {
   observado: ["info", "Observado", "activity"],
   oficial: ["neutral", "Cadastro oficial", "shield"],
   derivado: ["neutral", "Derivado", "layers"],
+  colaborativo: ["neutral", "Mapeamento colaborativo", "layers"],
   estimado: ["atencao", "Estimado", "flask"],
   sintetico: ["demo", "Sintético", "flask"],
 };

@@ -372,7 +372,7 @@ def main() -> None:
             ys = [p[1] for p in a["poligono"]]
             if min(xs) <= lon <= max(xs) and min(ys) <= lat <= max(ys) and ponto_no_poligono(lon, lat, a["poligono"]):
                 g = a["grau"]
-        return g or None
+        return g  # 0 = fora das áreas (cruzado); nulo ficaria para "não cruzado"
 
     # --------------------------------------------------------------- ocorrências
     focos = [(sum(p[1] for p in a["poligono"]) / len(a["poligono"]), sum(p[0] for p in a["poligono"]) / len(a["poligono"]), a["grau"]) for a in areas]
@@ -507,7 +507,8 @@ def main() -> None:
                      observacao="Suscetibilidade não é previsão: indica a predisposição do terreno, sem considerar a chuva."),
         "data": {
             "classes": [{"grau": g, "classe": c, "camada": "inundacao", "caracteristicas": t} for g, (c, t) in CLASSES_SUSC.items()],
-            "areas": [{k: v for k, v in a.items()} for a in areas],
+            "areas": [{"id": a["id"], "camada": a["camada"], "grau": a["grau"], "classe": a["classe"], "area_km2": a["area_km2"],
+                       "geometria": [[[list(p) for p in a["poligono"]] + [list(a["poligono"][0])]]]} for a in areas],
         },
     })
 
@@ -546,8 +547,8 @@ def main() -> None:
         "linhagem": linhagem,
         "nao_publicados": [
             {"id": "limites", "titulo": "Limites administrativos", "motivo": "A dimensão de subprefeituras da Gold não tem geometria."},
-            {"id": "setores", "titulo": "Setores censitários (IBGE)", "motivo": "Integração P2: geometria ainda não exportada para a web."},
-            {"id": "vias", "titulo": "Rede viária (OpenStreetMap)", "motivo": "Integração P2: volume das vias ainda não reduzido para a web."},
+            {"id": "setores", "titulo": "Setores censitários (IBGE)", "motivo": "O pacote de demonstração não inclui setores censitários; eles vêm só da publicação real (IBGE)."},
+            {"id": "vias", "titulo": "Rede viária (OpenStreetMap)", "motivo": "O pacote de demonstração não inclui a rede viária; ela vem só da publicação real (OpenStreetMap)."},
         ],
     }
     gravar("manifest.json", manifesto)

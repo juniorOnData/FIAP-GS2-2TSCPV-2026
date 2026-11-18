@@ -64,7 +64,7 @@ export const FONTES = [
     url: "https://rigeo.sgb.gov.br/handle/doc/15216",
   },
   {
-    id: "ibge", nome: "IBGE — Censo 2022", prioridade: "P2", publicado: false,
+    id: "ibge", nome: "IBGE — Censo 2022", prioridade: "P2", publicado: true,
     uso: "Pessoas e domicílios por setor censitário, para estimar população potencialmente exposta.",
     acesso: "Malha com atributos (GeoPackage do estado) no FTP do IBGE.",
     frequencia: "Conferência mensal.",
@@ -73,19 +73,19 @@ export const FONTES = [
     tabelas: ["gold.dim_ibge_census_tracts", "gold.fact_ibge_census_tract_population"],
     limitacoes: [
       "Dados agregados por setor: não permitem inferir exposição individual.",
-      "Ainda não publicado na web (integração P2, condicionada ao método de sobreposição).",
+      "No mapa, a camada de densidade mostra os setores com a geometria simplificada (tolerância de 8 m). O cruzamento com a suscetibilidade (população potencialmente exposta) ainda não está publicado: depende do método de sobreposição (F23).",
     ],
     url: "https://www.ibge.gov.br/",
   },
   {
-    id: "osm", nome: "OpenStreetMap (Geofabrik)", prioridade: "P2", publicado: false,
+    id: "osm", nome: "OpenStreetMap (Geofabrik)", prioridade: "P2", publicado: true,
     uso: "Rede viária para estimar vias potencialmente afetadas.",
     acesso: "Extrato free shapefile da região Sudeste (Geofabrik).",
     frequencia: "Job semanal (segunda-feira).",
     cobertura: "Cerca de 292 mil vias no envelope do município.",
     licenca: "© colaboradores do OpenStreetMap, ODbL 1.0 — exige atribuição; base derivada distribuída fica sob a ODbL.",
     tabelas: ["gold.dim_osm_road_class", "gold.dim_osm_roads"],
-    limitacoes: ["Ainda não publicado na web: o volume das vias precisa ser reduzido para a escala de visualização.", "Não há roteamento nem informação de trânsito."],
+    limitacoes: ["No site, só as vias principais (expressas, arteriais, coletoras e acessos): ruas locais, vias de serviço, caminhos e trilhas ficam de fora para o arquivo caber na web.", "Mapeamento colaborativo: a cobertura e a classificação variam por região.", "Não há roteamento nem informação de trânsito."],
     url: "https://www.openstreetmap.org/copyright",
   },
   {

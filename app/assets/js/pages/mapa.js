@@ -12,6 +12,12 @@ const RAIN_RAMP = ["#DCEBFC", "#B7D3F6", "#86B6EF", "#5598E7", "#2A78D6", "#1C5C
 import { computeInsights, insightCard } from "../insights.js";
 
 const SUSC_COLORS = { 1: "#E4DEFB", 2: "#B4A7EF", 3: "#6250D6" };
+// Densidade (hab/km²): rampa sequencial de um só tom, distinta da chuva (azul), do nível (verde) e da suscetibilidade (violeta).
+const DENS_BREAKS = [1000, 5000, 10000, 15000, 20000, 30000];
+const DENS_RAMP = ["#F6EFE4", "#EADBC2", "#DCC39E", "#CBA77A", "#B48A58", "#946B3E", "#6F4E2A"];
+const VIA_COR = "#334155";
+// Camadas pesadas (vários MB): só são baixadas quando o usuário liga a camada.
+const SOB_DEMANDA = { setores: "setores", vias: "vias" };
 const FONT = ["Montserrat SemiBold", "Open Sans Bold"];
 const EMPTY = { type: "FeatureCollection", features: [] };
 
@@ -20,7 +26,7 @@ let ctx = null; // dados carregados
 let root = null;
 let lastSubpref = null;
 const view = {
-  layers: { ocorrencias: true, chuva: true, nivel: true, suscetibilidade: false },
+  layers: { ocorrencias: true, chuva: true, nivel: true, suscetibilidade: false, setores: false, vias: false },
   rainWindow: "24h",
   basemapOk: true,
 };
@@ -61,7 +67,7 @@ export default {
     root.addEventListener("keydown", (e) => e.key === "Escape" && !$("#detail")?.hidden && closeDetail());
 
     const [occ, st, susc, nivel] = await Promise.all([getOccurrences(), getStations(), load("suscetibilidade"), load("nivel")]);
-    ctx = { occ, st, susc, nivel };
+    ctx = { occ, st, susc, nivel, setores: null, vias: null };
     renderFilters();
     renderLayersPanel();
     renderSideContent();
@@ -147,10 +153,23 @@ function addLayers() {
   map.addImage("diamond", makeDiamond("#0F8A73"), { pixelRatio: 2 });
   map.addImage("diamond-off", makeDiamond("#94A3B8"), { pixelRatio: 2 });
 
+  map.addSource("setores", { type: "geojson", data: EMPTY });
+  map.addLayer({ id: "setores-fill", type: "fill", source: "setores", paint: { "fill-color": ["case", ["==", ["get", "d"], null], "#E2E8F0", ["step", ["get", "d"], DENS_RAMP[0], ...DENS_BREAKS.flatMap((b, i) => [b, DENS_RAMP[i + 1]])]], "fill-opacity": 0.6 } }, firstSymbol);
+  map.addLayer({ id: "setores-line", type: "line", source: "setores", minzoom: 13, paint: { "line-color": "#FFFFFF", "line-width": 0.6 } }, firstSymbol);
+
   map.addSource("susc", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "susc-fill", type: "fill", source: "susc", paint: { "fill-color": ["match", ["get", "grau"], 3, SUSC_COLORS[3], 2, SUSC_COLORS[2], SUSC_COLORS[1]], "fill-opacity": ["match", ["get", "grau"], 3, 0.5, 2, 0.42, 0.38] } }, firstSymbol);
   map.addLayer({ id: "susc-line-media", type: "line", source: "susc", filter: ["==", ["get", "grau"], 2], paint: { "line-color": "#7B6AE0", "line-width": 1, "line-dasharray": [3, 2] } }, firstSymbol);
   map.addLayer({ id: "susc-line-alta", type: "line", source: "susc", filter: ["==", ["get", "grau"], 3], paint: { "line-color": "#3F2FB0", "line-width": 1.6 } }, firstSymbol);
+
+  map.addSource("vias", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "vias-line", type: "line", source: "vias", layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": VIA_COR, "line-opacity": 0.75,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, ["match", ["get", "h"], [1, 2], 1.6, [3, 4], 0.9, 0.5], 15, ["match", ["get", "h"], [1, 2], 5, [3, 4], 3.2, 2]],
+    },
+  }, firstSymbol);
 
   map.addSource("chuva", { type: "geojson", data: EMPTY });
   map.addLayer({
@@ -182,13 +201,13 @@ function addLayers() {
   map.addSource("sel", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: { "circle-radius": 13, "circle-color": "rgba(21,94,239,0.12)", "circle-stroke-color": "#155EEF", "circle-stroke-width": 2.5 } });
 
-  for (const id of ["oc-cluster", "oc-point", "chuva-circle", "nivel-icon", "susc-fill"]) {
+  for (const id of ["oc-cluster", "oc-point", "chuva-circle", "nivel-icon", "vias-line", "susc-fill", "setores-fill"]) {
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
   }
-  // Prioridade de clique: ponto > estação > sensor > cluster > polígono
+  // Prioridade de clique: ponto > estação > sensor > cluster > via > suscetibilidade > setor
   map.on("click", (e) => {
-    const order = ["oc-point", "chuva-circle", "nivel-icon", "oc-cluster", "susc-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
+    const order = ["oc-point", "chuva-circle", "nivel-icon", "oc-cluster", "vias-line", "susc-fill", "setores-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
     const hits = map.queryRenderedFeatures(e.point, { layers: order });
     if (!hits.length) return;
     hits.sort((a, b) => order.indexOf(a.layer.id) - order.indexOf(b.layer.id));
@@ -198,6 +217,8 @@ function addLayers() {
     else if (h.layer.id === "nivel-icon") showLevel(h.properties.id);
     else if (h.layer.id === "oc-cluster") showCluster(h);
     else if (h.layer.id === "susc-fill") showSusc(h.properties.id, e.lngLat);
+    else if (h.layer.id === "vias-line") showVia(h.properties.i, e.lngLat);
+    else if (h.layer.id === "setores-fill") showSetor(h.properties.i, e.lngLat);
   });
 }
 
@@ -263,11 +284,17 @@ function refreshData() {
   if (ctx.susc.status === "ok" && !map.getSource("susc")._loadedOnce) {
     map.getSource("susc").setData({
       type: "FeatureCollection",
-      features: [...ctx.susc.data.areas].sort((a, b) => a.grau - b.grau).map((a) => ({ type: "Feature", geometry: { type: "Polygon", coordinates: [[...a.poligono, a.poligono[0]]] }, properties: { id: a.id, grau: a.grau } })),
+      features: [...ctx.susc.data.areas].sort((a, b) => a.grau - b.grau).map((a) => ({ type: "Feature", geometry: { type: "MultiPolygon", coordinates: a.geometria }, properties: { id: a.id, grau: a.grau } })),
     });
     map.getSource("susc")._loadedOnce = true;
   }
   vis(["susc-fill", "susc-line-media", "susc-line-alta"], view.layers.suscetibilidade);
+
+  for (const id of Object.keys(SOB_DEMANDA)) {
+    if (view.layers[id]) carregarSobDemanda(id);
+  }
+  vis(["setores-fill", "setores-line"], view.layers.setores && ctx.setores?.status === "ok");
+  vis(["vias-line"], view.layers.vias && ctx.vias?.status === "ok");
 
   // recorte territorial: aproxima a subprefeitura selecionada
   const sp = store.filters.subprefeitura;
@@ -281,6 +308,26 @@ function refreshData() {
   }
   renderScope(occ.length, st.length);
   renderLayersPanel();
+}
+
+const publicado = (id) => Boolean(getManifest()?.datasets.some((d) => d.id === id));
+
+async function carregarSobDemanda(id) {
+  if (ctx[id] || !publicado(id)) return;
+  ctx[id] = { status: "carregando" };
+  renderLayersPanel();
+  const r = await load(SOB_DEMANDA[id]);
+  ctx[id] = r;
+  if (!map) return;
+  if (r.status === "ok") {
+    const c = r.data;
+    const features = id === "setores"
+      ? c.geometria.map((g, i) => ({ type: "Feature", geometry: { type: "MultiPolygon", coordinates: g }, properties: { i, d: c.densidade[i] } }))
+      : c.geometria.map((g, i) => ({ type: "Feature", geometry: { type: "MultiLineString", coordinates: g }, properties: { i, h: c.hierarquia[i] } }))
+          .sort((a, b) => b.properties.h - a.properties.h);
+    map.getSource(id).setData({ type: "FeatureCollection", features });
+  }
+  refreshData();
 }
 
 function renderScope(nOcc, nSt) {
@@ -349,8 +396,10 @@ function renderLayersPanel() {
         <div class="note">Predisposição do terreno a inundar, sem considerar a chuva. ${susc.meta ? natureBadge(susc.meta) : ""}</div>
       </div>`, { disabled: susc.status !== "ok", reason: "Suscetibilidade não publicada nesta versão." }),
     layerRow("limites", "Limites administrativos", "", "", { disabled: true, reason: naoPub.limites || "Não publicado." }),
-    layerRow("setores", "Setores censitários (IBGE)", "", "", { disabled: true, reason: naoPub.setores || "Não publicado." }),
-    layerRow("vias", "Rede viária (OpenStreetMap)", "", "", { disabled: true, reason: naoPub.vias || "Não publicado." }),
+    layerRow("setores", "Densidade populacional (IBGE)", "Setores censitários do Censo 2022 · hab/km²", legendaGeo("setores"),
+      { disabled: !publicado("setores"), reason: naoPub.setores || "Não publicado." }),
+    layerRow("vias", "Vias principais (OpenStreetMap)", "Expressas, arteriais, coletoras e acessos", legendaGeo("vias"),
+      { disabled: !publicado("vias"), reason: naoPub.vias || "Não publicado." }),
   ].join("");
 
   host.querySelectorAll("[data-layer]").forEach((cb) =>
@@ -368,6 +417,26 @@ function renderLayersPanel() {
       host.querySelector(`[data-win="${b.dataset.win}"]`)?.focus();
     }),
   );
+}
+
+function legendaGeo(id) {
+  const r = ctx[id];
+  if (!r || r.status === "carregando") return stateBlock("loading", id === "setores" ? "Baixando os setores censitários…" : "Baixando as vias…");
+  if (r.status !== "ok") return resultState(r, id === "setores" ? "Setores censitários" : "Vias");
+  if (id === "setores") {
+    const faixas = [0, ...DENS_BREAKS];
+    return `<div class="legend">
+      <div>Pessoas por km² · Censo 2022</div>
+      ${DENS_RAMP.map((c, i) => `<div class="legend__row"><span class="legend__sw" style="background:${c}"></span>${i < DENS_BREAKS.length ? `${fmtInt(faixas[i])} a ${fmtInt(DENS_BREAKS[i])}` : `${fmtInt(DENS_BREAKS[i - 1])} ou mais`}</div>`).join("")}
+      <div class="note">Dado agregado por setor: não identifica pessoas. ${natureBadge(r.meta)}</div>
+    </div>`;
+  }
+  return `<div class="legend">
+    <div class="legend__row"><span class="legend__line" style="height:4px;background:${VIA_COR}"></span>Expressas e arteriais de primeira linha</div>
+    <div class="legend__row"><span class="legend__line" style="height:3px;background:${VIA_COR}"></span>Arteriais e coletoras principais</div>
+    <div class="legend__row"><span class="legend__line" style="height:2px;background:${VIA_COR}"></span>Coletoras e acessos</div>
+    <div class="note">${esc(r.meta.observacao || "")} Dados © colaboradores do OpenStreetMap, ODbL.</div>
+  </div>`;
 }
 
 function renderSideContent() {
@@ -543,6 +612,41 @@ function showLevel(id) {
     </dl>
     <a class="btn btn--secondary btn--sm" href="#/monitoramento?nivel=${encodeURIComponent(id)}">${icon("activity")}Abrir série no monitoramento</a>
     <hr class="divider">${provenance(ctx.nivel.meta)}`, [s.lon, s.lat]);
+}
+
+function showSetor(i, lngLat) {
+  const c = ctx.setores.data;
+  openDetail(`Setor censitário ${c.id[i]}`, `
+    <div class="pill-list">${natureBadge(ctx.setores.meta)} ${c.favela[i] ? badge("neutral", "Favela e comunidade urbana", "home") : ""}</div>
+    <div class="mini-kpis" style="margin-top:12px">
+      <div class="mini-kpi"><span>Pessoas</span><b>${fmtInt(c.pessoas[i])}</b><small>Censo 2022</small></div>
+      <div class="mini-kpi"><span>Densidade</span><b>${fmtInt(c.densidade[i])}</b><small>hab/km²</small></div>
+    </div>
+    <dl class="dl" style="margin-top:12px">
+      <dt>Distrito</dt><dd>${esc(c.distrito[i] || "—")}</dd>
+      <dt>Situação</dt><dd>${esc(c.situacao[i] || "—")}</dd>
+      <dt>Domicílios</dt><dd>${fmtInt(c.domicilios[i])}</dd>
+      <dt>Área</dt><dd>${fmt2(c.area_km2[i])} km²</dd>
+      <dt>Tabela</dt><dd class="mono">gold.fact_ibge_census_tract_population</dd>
+    </dl>
+    <p class="note" style="margin-top:12px">${esc(ctx.setores.meta.observacao || "")}</p>
+    <hr class="divider">${provenance(ctx.setores.meta)}`, [lngLat.lng, lngLat.lat]);
+}
+
+function showVia(i, lngLat) {
+  const c = ctx.vias.data;
+  const tipo = [c.ponte[i] && "ponte ou viaduto", c.tunel[i] && "túnel"].filter(Boolean).join(", ");
+  openDetail(c.nome[i] || "Via sem nome no OpenStreetMap", `
+    <div class="pill-list">${natureBadge(ctx.vias.meta)}</div>
+    <dl class="dl" style="margin-top:12px">
+      <dt>Classe</dt><dd>${esc(c.classe[i] || "—")}</dd>
+      ${c.ref[i] ? `<dt>Referência</dt><dd>${esc(c.ref[i])}</dd>` : ""}
+      ${tipo ? `<dt>Trecho</dt><dd>${esc(tipo)}</dd>` : ""}
+      <dt>Comprimento</dt><dd>${fmt2(c.km[i])} km</dd>
+      <dt>Identificador OSM</dt><dd class="mono">way ${esc(c.id[i])}</dd>
+    </dl>
+    <p class="note" style="margin-top:12px">Dados © colaboradores do OpenStreetMap, ODbL 1.0. Sem informação de trânsito nem de interdição.</p>
+    <hr class="divider">${provenance(ctx.vias.meta)}`, [lngLat.lng, lngLat.lat]);
 }
 
 function showSusc(id, lngLat) {
