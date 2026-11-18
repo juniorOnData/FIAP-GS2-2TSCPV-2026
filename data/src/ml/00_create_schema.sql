@@ -33,8 +33,10 @@ CREATE TABLE IF NOT EXISTS fiap_analytics.ml.model_metrics (
   model_id STRING NOT NULL COMMENT 'Identificador estável do modelo',
   horizon_hours INT COMMENT 'Horizonte previsto em horas; nulo para modelos anuais',
   split STRING NOT NULL COMMENT 'Conjunto temporal: validation ou test',
+  segment STRING COMMENT 'Recorte da métrica (por exemplo, sensor:123); nulo = conjunto inteiro',
   metric STRING NOT NULL COMMENT 'Nome da métrica',
   value DOUBLE COMMENT 'Valor calculado da métrica',
   computed_at TIMESTAMP COMMENT 'Instante de cálculo em UTC'
 ) USING DELTA
 COMMENT 'Métricas de validação temporal dos modelos experimentais';
+
