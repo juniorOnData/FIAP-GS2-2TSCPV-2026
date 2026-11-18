@@ -68,7 +68,8 @@ app/
 | F08 séries históricas | Feito (dia ou mês, conforme o período) |
 | F09 sobre os dados · F11 qualidade e linhagem | Feito (qualidade simulada no pacote de demonstração) |
 | F10 carregando, vazio, erro, desatualizado | Feito, em cada painel |
-| F12 suscetibilidade | Feito, rotulada como não previsão |
+| F12 suscetibilidade | Feito, rotulada como não previsão, com o cruzamento das ocorrências |
+| Camadas IBGE e OSM | Densidade populacional por setor censitário e vias principais, baixadas só quando a camada é ligada. Impacto potencial sobre população e vias (F23) ainda não |
 | F14 base de conhecimento | Feito |
 | F15 assistente | Modo demonstrativo sem LLM (busca na base e cálculos com fontes); integração com modelo é a decisão em aberto nº 3 |
 | F16 perfis | Feito, sem login (decisão em aberto nº 1) |

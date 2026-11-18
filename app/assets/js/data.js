@@ -45,6 +45,11 @@ export function load(id) {
   cache.set(id, p);
   return p;
 }
+// Só os metadados: usa a cópia do manifesto quando existe (evita baixar setores e vias, de vários MB).
+export function loadMeta(id) {
+  const ds = manifest?.datasets.find((d) => d.id === id);
+  return ds?.meta ? Promise.resolve({ status: "ok", meta: ds.meta, id }) : load(id);
+}
 export const loadMany = (ids) => Promise.all(ids.map(load)).then((arr) => Object.fromEntries(arr.map((r) => [r.id, r])));
 
 // Atualização: compara a referência do dado com o relógio do usuário.

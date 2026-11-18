@@ -24,7 +24,8 @@ A última tarefa do job `ChuvaSegura`, `src/shared/export/01_export_web.py`, exp
 - **Trava de qualidade:** cada fonte só é exportada se a qualidade Gold dela rodou **na mesma execução do job** e passou.
 - **Uma fonte com falha não derruba as outras:** o que passou vai ao GitHub, e os conjuntos da fonte que falhou continuam no site com a versão já publicada (marcados `mantido` no manifesto, que também lista as `falhas`). Se a falha veio antes do export (qualidade Gold reprovada ou que não rodou nesta execução), ela já aparece na tarefa da fonte e o `export_web` termina com sucesso; erro no código do export termina a tarefa com erro.
 - **Sem commit à toa:** o commit só acontece se os dados mudaram (compara o SHA-256 de cada conjunto com o `manifest.json` publicado). A chuva horária muda toda hora, então na prática há um commit por execução.
-- **Fontes que ainda não rodaram:** o widget `fontes` (padrão `geosampa,cemaden,sibh,inmet`) escolhe o que exportar. Antes do backfill do INMET, tire `inmet`.
+- **Fontes que ainda não rodaram:** o widget `fontes` (padrão `geosampa,cemaden,sibh,inmet,sgb,ibge,osm`) escolhe o que exportar. Antes do backfill do INMET, tire `inmet`.
+- **Camadas geoespaciais:** o SGB gera `suscetibilidade.json` (áreas de inundação) e cruza as ocorrências com elas (`grau_susc_inundacao`); o IBGE gera `setores.json` (população por setor do Censo 2022) e o OSM gera `vias.json` (só vias de hierarquia 1 a 5). As geometrias são simplificadas em Python puro (`common/publicacao_web.py`, sem dependências); a área por grau é a união dos polígonos, porque a camada de inundação tem sobreposições. Os limites administrativos continuam fora: a Gold não tem a geometria das subprefeituras nem dos distritos.
 - **Segredo:** scope `github`, chave `token`, com um token do GitHub de permissão *Contents: read and write* **só neste repositório** (fine-grained). Crie com `databricks secrets create-scope github` e `databricks secrets put-secret github token`. O token nunca é gravado em arquivo ou log.
 - **Branch:** o commit vai para a branch de produção da Vercel (widget `github_branch`, padrão `main`). Se ela tiver proteção que exige PR, o commit falha: use uma branch de dados dedicada e aponte a Vercel para ela, ou libere o token na regra.
 - **Unidade do nível:** a fato guarda a cota do SIBH em centímetros (valores entre 71.000 e 79.000 nos rios da capital, ou seja, 710 a 790 m de altitude). O widget `unidade_nivel_origem` (padrão `cm`) diz a unidade da fonte, e o export converte para metros e declara `unidade_origem` no `nivel.json`.
@@ -249,6 +250,7 @@ Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` co
    Depois, faça o upload em *Catalog → fiap_analytics → bronze → Volumes → geosampa_history_flooding_events → Upload*.
 
 ## Ordem de execução
+
 
 ### CEMADEN
 

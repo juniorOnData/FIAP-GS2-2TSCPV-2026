@@ -139,6 +139,7 @@ textarea.input { height: auto; min-height: 44px; padding: 10px var(--s-3); resiz
 .legend { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); }
 .legend__row { display: flex; align-items: center; gap: var(--s-2); }
 .legend__sw { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.legend__line { width: 22px; border-radius: 2px; flex-shrink: 0; }
 .legend__dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25); }
 .legend__diamond { width: 11px; height: 11px; transform: rotate(45deg); flex-shrink: 0; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25); margin: 0 1px; }
 .legend__ramp { height: 10px; border-radius: 3px; flex: 1; }

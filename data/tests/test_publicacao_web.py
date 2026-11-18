@@ -14,7 +14,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from common import github_publish  # noqa: E402
 from common.publicacao_web import (  # noqa: E402
-    FATOR_PARA_METRO, TZ_SP, data_para_cod, hora_sp, iso_sp, pior_qualidade, serie_diaria, serie_horaria, sha256_dados,
+    FATOR_PARA_METRO, M_POR_GRAU_LAT, M_POR_GRAU_LON, TZ_SP, IndicePoligonos, anel_web, area_uniao_por_grau, linhas_web,
+    poligonos_web, simplificar, data_para_cod, hora_sp, iso_sp, pior_qualidade, serie_diaria, serie_horaria, sha256_dados,
 )
 
 
@@ -66,6 +67,62 @@ class SeriesTest(unittest.TestCase):
     def test_pior_qualidade(self):
         self.assertEqual(pior_qualidade(["aprovado", "aprovado_com_avisos"]), "aprovado_com_avisos")
         self.assertEqual(pior_qualidade(["aprovado"]), "aprovado")
+
+
+def quadrado(x0, y0, lado_m):
+    """Anel fechado de um quadrado com lado em metros, a partir de (lon, lat)."""
+    dx, dy = lado_m / M_POR_GRAU_LON, lado_m / M_POR_GRAU_LAT
+    return [(x0, y0), (x0 + dx, y0), (x0 + dx, y0 + dy), (x0, y0 + dy), (x0, y0)]
+
+
+class GeometriaTest(unittest.TestCase):
+    X, Y = -46.6, -23.6
+
+    def test_simplificar_remove_pontos_quase_alinhados(self):
+        reta = [(self.X + i * 1e-4, self.Y + (0.5e-6 if i % 2 else 0)) for i in range(11)]  # desvio de ~5 cm
+        self.assertEqual(simplificar(reta, 1.0), [reta[0], reta[-1]])
+        curva = [(self.X, self.Y), (self.X + 1e-3, self.Y + 1e-3), (self.X + 2e-3, self.Y)]  # ~110 m de desvio
+        self.assertEqual(len(simplificar(curva, 10.0)), 3)
+
+    def test_anel_web_fecha_arredonda_e_descarta_o_que_some(self):
+        anel = anel_web(quadrado(self.X, self.Y, 200), 5.0)
+        self.assertEqual(anel[0], anel[-1])
+        self.assertEqual(len(anel), 5)
+        self.assertTrue(all(len(str(v).split(".")[1]) <= 5 for p in anel for v in p))
+        self.assertIsNone(anel_web(quadrado(self.X, self.Y, 0.3), 5.0))  # menor que a precisão de 5 casas
+
+    def test_poligonos_web_mantem_buraco_e_descarta_buraco_minusculo(self):
+        externo = quadrado(self.X, self.Y, 1000)
+        buraco = quadrado(self.X + 0.002, self.Y + 0.002, 200)
+        mini = quadrado(self.X + 0.005, self.Y + 0.005, 0.3)
+        out = poligonos_web(("Polygon", [externo, buraco, mini]), 5.0)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(len(out[0]), 2)
+
+    def test_linhas_web(self):
+        out = linhas_web(("MultiLineString", [[(self.X, self.Y), (self.X + 1e-3, self.Y)], [(self.X, self.Y)]]), 5.0)
+        self.assertEqual(out, [[[self.X, self.Y], [round(self.X + 1e-3, 5), self.Y]]])
+
+    def test_indice_respeita_buraco_e_devolve_maior_grau(self):
+        baixa = [[quadrado(self.X, self.Y, 1000), quadrado(self.X + 0.003, self.Y + 0.003, 300)]]
+        alta = [[quadrado(self.X + 0.001, self.Y + 0.001, 100)]]
+        ind = IndicePoligonos([(1, baixa), (3, alta)])
+        self.assertEqual(ind.maior_valor(self.X + 0.0015, self.Y + 0.0015), 3)  # dentro das duas
+        self.assertEqual(ind.maior_valor(self.X + 0.006, self.Y + 0.006), 1)
+        self.assertEqual(ind.maior_valor(self.X + 0.0045, self.Y + 0.0045), 0)  # no buraco
+        self.assertEqual(ind.maior_valor(self.X - 0.01, self.Y), 0)  # fora
+
+    def test_area_uniao_conta_sobreposicao_uma_vez_no_maior_grau(self):
+        a = [[quadrado(self.X, self.Y, 1000)]]  # 1 km²
+        b = [[quadrado(self.X + 500 / M_POR_GRAU_LON, self.Y, 1000)]]  # 1 km², metade sobre a
+        alta = [[quadrado(self.X, self.Y, 500)]]  # 0,25 km² dentro de a
+        area = area_uniao_por_grau([(1, a), (1, b), (3, alta)], passo_m=5.0)
+        self.assertAlmostEqual(area[3], 0.25, places=2)
+        self.assertAlmostEqual(area[1], 1.5 - 0.25, places=2)
+
+    def test_area_uniao_desconta_buraco(self):
+        pol = [[quadrado(self.X, self.Y, 1000), quadrado(self.X + 0.002, self.Y + 0.002, 500)]]
+        self.assertAlmostEqual(area_uniao_por_grau([(2, pol)], passo_m=5.0)[2], 0.75, places=2)
 
 
 class FakeGitHub(BaseHTTPRequestHandler):

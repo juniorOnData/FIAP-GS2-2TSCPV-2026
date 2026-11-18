@@ -2,7 +2,7 @@
 import { icon } from "../icons.js";
 import { esc, fmtInt, fmt1, fmtPct, fmtDateTime, groupCount, mean, fmtMonth } from "../util.js";
 import { store, resolvePeriod, previousPeriod } from "../store.js";
-import { getOccurrences, filterOccurrences, getStations, filterStations, rainInPeriod, rainLastHours, load, getManifest, monthsBetween } from "../data.js";
+import { getOccurrences, filterOccurrences, getStations, filterStations, rainInPeriod, rainLastHours, load, loadMeta, getManifest, monthsBetween } from "../data.js";
 import { kpiCard, filterBar, bindFilterBar, freshnessBadge, natureBadge, subprefNome, stateBlock, resultState, provenance, card, table, badge } from "../ui.js";
 import { columnChart, barList, chartBlock, legendKeys, TYPE_COLORS } from "../charts.js";
 import { ROUTE_META } from "../routes.js";
@@ -114,7 +114,7 @@ export default {
 
     // ---------- estado dos dados
     const m = getManifest();
-    const sts = await Promise.all(m.datasets.map((d) => load(d.id)));
+    const sts = await Promise.all(m.datasets.map((d) => loadMeta(d.id)));
     root.querySelector("#c-status").innerHTML = card({
       title: "Estado dos dados publicados", sub: "Fonte, natureza e atualização de cada conjunto",
       body: table(
@@ -123,7 +123,7 @@ export default {
           { label: "Natureza", fmt: (r) => natureBadge(r.meta || r) },
           { label: "Atualização", fmt: (r) => (r.res.status === "ok" || r.res.status === "vazio" ? freshnessBadge(r.res.meta, r.id) : badge("error", "Falha ao carregar", "alert")) },
         ],
-        m.datasets.filter((d) => d.id !== "avisos_oficiais").map((d, i) => ({ ...d, res: sts[i], meta: sts[i].meta })),
+        m.datasets.map((d, i) => ({ ...d, res: sts[i], meta: sts[i].meta })).filter((d) => d.id !== "avisos_oficiais"),
       ) + `<p class="note" style="margin-top:8px">Não publicados nesta versão: ${m.nao_publicados.map((n) => esc(n.titulo)).join(", ")}.</p>`,
     });
 

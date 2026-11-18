@@ -1,7 +1,7 @@
 // Sobre os dados (F09) e qualidade/linhagem (F11).
 import { icon } from "../icons.js";
 import { esc, fmtInt, fmtDateTime, fmtDay } from "../util.js";
-import { getManifest, isDemo, load } from "../data.js";
+import { getManifest, isDemo, loadMeta } from "../data.js";
 import { natureBadge, freshnessBadge, badge, stateBlock, table, card, pageHead } from "../ui.js";
 import { FONTES, METODOLOGIA } from "../content.js";
 
@@ -39,7 +39,7 @@ export default {
     if (tab === "licencas") panel.innerHTML = licencas();
     if (tab === "linhagem") panel.innerHTML = linhagem(m);
     if (tab === "conjuntos") {
-      const res = await Promise.all(m.datasets.map((d) => load(d.id)));
+      const res = await Promise.all(m.datasets.map((d) => loadMeta(d.id)));
       panel.innerHTML = res.map((r, i) => conjunto(m.datasets[i], r, params.get("ds"))).join("") +
         card({ title: "Não publicados nesta versão", body: table([{ key: "titulo", label: "Conjunto" }, { key: "motivo", label: "Motivo" }], m.nao_publicados) });
       const alvo = params.get("ds") && root.querySelector(`#ds-${CSS.escape(params.get("ds"))}`);

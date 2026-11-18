@@ -6,7 +6,7 @@
 # MAGIC
 # MAGIC 1. Roda depois de todas as fontes (`run_if: ALL_DONE`).
 # MAGIC 2. Cada fonte só é exportada se a qualidade Gold dela rodou **nesta execução** do job e não teve falha `ERRO`.
-# MAGIC 3. Fontes exportadas hoje: GeoSampa (ocorrências e subprefeituras), CEMADEN, SIBH e INMET (estações, chuva diária e horária) e SIBH (nível). IBGE, OSM e a suscetibilidade do SGB entram em etapas posteriores.
+# MAGIC 3. Fontes exportadas: GeoSampa (ocorrências e subprefeituras), CEMADEN, SIBH e INMET (estações, chuva diária e horária), SIBH (nível), SGB (áreas de suscetibilidade a inundação, cruzadas com as ocorrências), IBGE (setores censitários com população) e OSM (vias principais). As geometrias são simplificadas para a escala do mapa; os limites administrativos não têm geometria na Gold.
 # MAGIC 4. O pacote é gravado no Volume `fiap_analytics.gold.chuvasegura_web` (o `manifest.json` por último) e vai ao GitHub com as fontes que passaram. **Fonte com falha não derruba as outras:** os conjuntos dela continuam no site com a versão já publicada (o arquivo não é sobrescrito e o manifesto marca `mantido`). Falha que vem de antes do export (qualidade Gold reprovada ou que não rodou nesta execução) já aparece na tarefa da própria fonte, então o export termina com sucesso; erro no código do export termina a tarefa com erro.
 # MAGIC 5. O commit só acontece se os dados mudaram (compara o SHA-256 de cada conjunto com o manifesto publicado).
 # MAGIC
@@ -17,7 +17,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("inicio_execucao", "", "Início do job (ISO 8601); vazio = última qualidade")
-dbutils.widgets.text("fontes", "geosampa,cemaden,sibh,inmet", "Fontes a exportar")
+dbutils.widgets.text("fontes", "geosampa,cemaden,sibh,inmet,sgb,ibge,osm", "Fontes a exportar")
 dbutils.widgets.dropdown("github_publicar", "sim", ["sim", "nao"], "Enviar ao GitHub")
 dbutils.widgets.text("github_repo", "juniorOnData/FIAP-GS2-2TSCPV-2026", "Repositório (dono/nome)")
 dbutils.widgets.text("github_branch", "main", "Branch de produção da Vercel")
@@ -40,10 +40,10 @@ if not os.path.isdir(os.path.join(_src, "common")):
     raise RuntimeError(f"Pasta src/common não encontrada a partir de {os.getcwd()}")
 if _src not in sys.path:
     sys.path.append(_src)
-from common import github_publish  # noqa: E402
+from common import geo, github_publish  # noqa: E402
 from common.publicacao_web import (  # noqa: E402
-    DIA_INICIAL, DIAS_NIVEL, FATOR_PARA_METRO, data_para_cod, hora_sp, iso_sp, json_bytes, pior_qualidade, serie_diaria, serie_horaria,
-    sha256_dados,
+    DIA_INICIAL, DIAS_NIVEL, FATOR_PARA_METRO, IndicePoligonos, area_uniao_por_grau, cod_para_data, data_para_cod, hora_sp, iso_sp, json_bytes,
+    linhas_web, pior_qualidade, poligonos_web, serie_diaria, serie_horaria, sha256_dados,
 )
 
 spark.conf.set("spark.sql.session.timeZone", "UTC")  # executado_em e inicio_execucao comparados em UTC
@@ -53,13 +53,13 @@ VOLUME = f"{CATALOG}.gold.chuvasegura_web"
 VOLUME_PATH = f"/Volumes/{CATALOG}/gold/chuvasegura_web"
 DIM_TEMPO = f"{CATALOG}.gold.dim_tempo"
 PASTA_SITE = "app/data/gold"  # destino no repositório
-VERSAO = "1.3.0"
+VERSAO = "1.4.0"
 
 AGORA_DT = datetime.now(ZoneInfo("America/Sao_Paulo"))
 AGORA = AGORA_DT.isoformat(timespec="seconds")
 INICIO_EXECUCAO = dbutils.widgets.get("inicio_execucao").strip()
 FONTES = {f.strip().lower() for f in dbutils.widgets.get("fontes").split(",") if f.strip()}
-DESCONHECIDAS = FONTES - {"geosampa", "cemaden", "sibh", "inmet"}
+DESCONHECIDAS = FONTES - {"geosampa", "cemaden", "sibh", "inmet", "sgb", "ibge", "osm"}
 if DESCONHECIDAS:
     raise ValueError(f"Fontes desconhecidas em 'fontes': {sorted(DESCONHECIDAS)}")
 GITHUB_PUBLICAR = dbutils.widgets.get("github_publicar") == "sim"
@@ -68,6 +68,11 @@ GITHUB_BRANCH = dbutils.widgets.get("github_branch").strip()
 UNIDADE_NIVEL_ORIGEM = dbutils.widgets.get("unidade_nivel_origem")
 FATOR_NIVEL = FATOR_PARA_METRO[UNIDADE_NIVEL_ORIGEM]
 ENVELOPE = (-24.1, -23.3, -47.0, -46.3)  # lat mín, lat máx, lon mín, lon máx (município e entorno)
+# Simplificação das geometrias (Douglas-Peucker, em metros): abaixo de ~1 pixel no zoom em que cada camada é lida.
+TOLERANCIA_SUSC_M = 5
+TOLERANCIA_SETOR_M = 8
+TOLERANCIA_VIA_M = 8
+HIERARQUIA_VIAS_MAX = 5  # vias expressas a coletoras e seus acessos; ruas locais, serviço e trilhas ficam de fora
 
 print(f"Publicação {VERSAO} em {AGORA} | fontes: {sorted(FONTES)} | início do job: {INICIO_EXECUCAO or '(execução manual)'}")
 
@@ -147,6 +152,7 @@ def pacote(arquivo, meta, data):
         "publicado_em": AGORA, "periodo": meta.get("periodo"), "data_referencia": meta.get("data_referencia"),
         "registros": meta["registros"], "qualidade": meta["qualidade"]["estado"], "bytes": len(corpo),
         "sha256_dados": sha256_dados(data),
+        "meta": meta,  # cópia no manifesto: as telas de metadados não precisam baixar os arquivos grandes
     }
     for k in ("referencia", "registros_origem", "registros_descartados"):
         if k in meta:
@@ -156,12 +162,100 @@ def pacote(arquivo, meta, data):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## SGB: suscetibilidade a inundação
+# MAGIC
+# MAGIC Roda antes do GeoSampa, porque as ocorrências recebem o grau da área de inundação que as contém (o maior, se houver mais de uma). As áreas por grau são a união dos polígonos (a camada de inundação tem sobreposições), e a área do município é a união da camada de movimentos de massa, que cobre todo o território da carta.
+
+# COMMAND ----------
+
+SGB = {"areas": f"{CATALOG}.gold.dim_sgb_susceptibility_areas", "classes": f"{CATALOG}.gold.dim_sgb_susceptibility_class"}
+
+
+def poligonos_da_camada(camada):
+    """[(linha, poligonos)] das áreas graduadas de uma camada, com a geometria completa (para cruzar e medir)."""
+    linhas = (
+        spark.table(SGB["areas"]).alias("a")
+        .join(spark.table(SGB["classes"]).alias("c"), F.col("a.COD_DIM_CLASSE") == F.col("c.COD_DIM_CLASSE"), "left")
+        .where((F.col("a.COD_CAMADA") == camada) & (F.col("a.COD_DIM_AREA_SUSCETIBILIDADE") != -1) & F.col("a.GEO_WKB").isNotNull())
+        .select(F.col("a.COD_DIM_AREA_SUSCETIBILIDADE").alias("id"), F.col("a.NUM_GRAU_SUSCETIBILIDADE").alias("grau"),
+                F.col("c.DSC_CLASSE").alias("classe"), F.col("a.NUM_AREA_KM2").alias("area_km2"), F.col("a.GEO_WKB").alias("wkb"),
+                F.col("a.DSC_VERSAO_FONTE").alias("versao"))
+        .orderBy("id")
+    )
+    out = []
+    for r in linhas.toLocalIterator():
+        g = geo.de_wkb(r["wkb"])
+        pols = [p for p in geo.poligonos(g) if p] if g else []
+        if pols:
+            out.append((r, g, pols))
+    return out
+
+
+def exportar_sgb():
+    qualidade = qualidade_gold("sgb")
+    fonte = {"id": "sgb", "nome": "SGB/CPRM e IPT — Carta de suscetibilidade (2015)", "url": "https://rigeo.sgb.gov.br/handle/doc/15216"}
+    classes = [
+        {"grau": r["grau"], "classe": r["classe"], "camada": "inundacao", "caracteristicas": r["car"], "declividade": r["decl"],
+         "area_quadro_sintese_km2": r["quadro"]}
+        for r in spark.table(SGB["classes"])
+        .where((F.col("COD_CAMADA") == "inundacao") & F.col("NUM_GRAU_SUSCETIBILIDADE").isNotNull())
+        .select(F.col("NUM_GRAU_SUSCETIBILIDADE").alias("grau"), F.col("DSC_CLASSE").alias("classe"),
+                F.col("DSC_CARACTERISTICAS").alias("car"), F.col("DSC_DECLIVIDADE").alias("decl"),
+                F.col("NUM_AREA_QUADRO_SINTESE_KM2").alias("quadro"))
+        .orderBy(F.col("grau").desc()).collect()
+    ]
+    if {c["grau"] for c in classes} != {1, 2, 3}:
+        raise RuntimeError(f"Classes de inundação incompletas na Gold do SGB: {[c['grau'] for c in classes]}")
+
+    areas, itens, versoes = [], [], set()
+    for r, g, pols in poligonos_da_camada("inundacao"):
+        if r["grau"] not in (1, 2, 3):
+            continue
+        web = poligonos_web(g, TOLERANCIA_SUSC_M)
+        if not web:
+            continue
+        areas.append({"id": int(r["id"]), "camada": "inundacao", "grau": int(r["grau"]), "classe": r["classe"],
+                      "area_km2": round(r["area_km2"], 4), "geometria": web})
+        itens.append((int(r["grau"]), pols))
+        versoes.add(r["versao"])
+    if not areas:
+        raise RuntimeError("A Gold do SGB não tem áreas de inundação com geometria.")
+
+    uniao = area_uniao_por_grau(itens)
+    municipio = sum(area_uniao_por_grau([(1, pols) for _, _, pols in poligonos_da_camada("movimento_massa")]).values())
+    if not 1400 <= municipio <= 1650:
+        raise RuntimeError(f"Área do município pela carta fora do esperado: {municipio:.1f} km² (cerca de 1.521 km²).")
+
+    meta = dataset_meta(
+        "suscetibilidade", "Suscetibilidade a inundações", "derivado", fonte, "Dados públicos do Serviço Geológico do Brasil.",
+        [SGB["areas"], SGB["classes"]], len(areas), qualidade, data_referencia="2015",
+        granularidade={"espacial": "polígono, escala 1:75.000", "temporal": "estático (carta de 2015)"},
+        extra={"unidade": "classe (Alta, Média, Baixa)", "area_municipio_km2": round(municipio, 2),
+               "area_uniao_km2": {str(k): round(uniao.get(k, 0.0), 2) for k in (3, 2, 1)},
+               "simplificacao_m": TOLERANCIA_SUSC_M, "versao_fonte": ", ".join(sorted(v for v in versoes if v)),
+               "observacao": "Suscetibilidade não é previsão: indica a predisposição do terreno, sem considerar a chuva. "
+                             "Áreas por classe sem contar sobreposições (cada ponto no maior grau); polígonos simplificados para o mapa."},
+    )
+    corpo, entrada = pacote("suscetibilidade.json", meta, {"classes": classes, "areas": areas})
+    print(f"SGB: {len(areas)} áreas de inundação ({len(corpo) / 1024:.0f} KB); união por grau {meta['area_uniao_km2']} km²; "
+          f"município {municipio:.1f} km²; qualidade {qualidade['estado']}")
+    return {
+        "arquivos": {"suscetibilidade.json": corpo}, "datasets": [entrada],
+        "linhagem": [{"fonte": "SGB", "tabelas": ["bronze.sgb_susceptibility_areas", "silver.sgb_susceptibility_areas", "gold.dim_sgb_susceptibility_areas"],
+                      "publicado_na_web": True, "processado_em": AGORA, "qualidade": qualidade["estado"], "avisos": qualidade["avisos"]}],
+        "indice": IndicePoligonos(itens),
+    }
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## GeoSampa: ocorrências e subprefeituras
 
 # COMMAND ----------
 
 
-def exportar_geosampa():
+def exportar_geosampa(indice_susc=None):
+    """indice_susc: áreas de inundação do SGB (IndicePoligonos), ou None se o SGB não foi exportado."""
     fato = f"{CATALOG}.gold.fact_geosampa_flooding_events"
     dim_tipo = f"{CATALOG}.gold.dim_geosampa_type_flooding_events"
     dim_sp = f"{CATALOG}.gold.dim_geosampa_subprefecture_area"
@@ -196,8 +290,10 @@ def exportar_geosampa():
     for row in eventos.toLocalIterator():
         for k in nomes:
             colunas[k].append(row[k])
-    # Cruzamento com a carta SGB ainda não publicado: nulo = "não cruzado", não "fora de área suscetível".
-    colunas["grau_susc_inundacao"] = [None] * len(colunas["id"])
+    # Grau da área de inundação que contém o ponto (0 = fora das áreas mapeadas); nulo = cruzamento não feito.
+    colunas["grau_susc_inundacao"] = (
+        [indice_susc.maior_valor(lon, lat) for lon, lat in zip(colunas["lon"], colunas["lat"])] if indice_susc
+        else [None] * len(colunas["id"]))
     if not colunas["id"]:
         raise RuntimeError("A Gold do GeoSampa não gerou ocorrências com data e coordenadas válidas.")
     descartadas = total_fato - len(colunas["id"])
@@ -217,7 +313,9 @@ def exportar_geosampa():
         "ocorrencias", "Ocorrências históricas", "historico", fonte, licenca, [fato, DIM_TEMPO, dim_tipo, dim_sp],
         len(colunas["id"]), qualidade, periodo=periodo, granularidade={"espacial": "ponto", "temporal": "dia"},
         extra={"unidade": "ocorrências", "registros_origem": total_fato, "registros_descartados": descartadas,
-               "observacao": "A Gold do GeoSampa não informa hora do evento. O campo de suscetibilidade fica nulo até a publicação do cruzamento com a carta SGB."},
+               "observacao": "A Gold do GeoSampa não informa hora do evento. " + (
+                   "grau_susc_inundacao: maior grau das áreas de inundação do SGB que contêm o ponto (0 = fora delas)." if indice_susc
+                   else "grau_susc_inundacao fica nulo: o cruzamento com a carta do SGB não foi feito nesta publicação.")},
     )
     arq_sp, ent_sp = pacote("subprefeituras.json", meta_sp, subprefeituras)
     arq_oc, ent_oc = pacote("ocorrencias.json", meta_oc, colunas)
@@ -415,6 +513,135 @@ def exportar_nivel(cad_nivel):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## IBGE: setores censitários com população
+# MAGIC
+# MAGIC Uma feição por setor do Censo 2022, com pessoas, domicílios e densidade. Dado agregado por setor: não identifica pessoas.
+
+# COMMAND ----------
+
+
+def exportar_ibge():
+    qualidade = qualidade_gold("ibge")
+    dim = f"{CATALOG}.gold.dim_ibge_census_tracts"
+    fato = f"{CATALOG}.gold.fact_ibge_census_tract_population"
+    fonte = {"id": "ibge", "nome": "IBGE — Censo 2022", "url": "https://www.ibge.gov.br/"}
+    ref = spark.table(fato).where(F.col("COD_DIM_SETOR") != -1).agg(F.max("COD_DIM_TEMPO")).first()[0]
+    if ref is None:
+        raise RuntimeError("A fato de população do IBGE está vazia.")
+    linhas = (
+        spark.table(dim).alias("d")
+        .join(spark.table(fato).where(F.col("COD_DIM_TEMPO") == ref).alias("f"), F.col("d.COD_DIM_SETOR") == F.col("f.COD_DIM_SETOR"), "left")
+        .where((F.col("d.COD_DIM_SETOR") != -1) & F.col("d.GEO_WKB").isNotNull())
+        .select(F.col("d.COD_SETOR").alias("id"), F.col("d.NOM_DISTRITO").alias("distrito"), F.col("d.DSC_SITUACAO").alias("situacao"),
+                F.col("d.FLG_FAVELA").alias("favela"), F.col("f.NUM_PESSOAS").alias("pessoas"), F.col("f.NUM_DOMICILIOS").alias("domicilios"),
+                F.col("d.NUM_AREA_KM2").alias("area_km2"), F.col("f.NUM_DENSIDADE_HAB_KM2").alias("densidade"), F.col("d.GEO_WKB").alias("wkb"))
+        .orderBy("id")
+    )
+    nomes = ("id", "distrito", "situacao", "favela", "pessoas", "domicilios", "area_km2", "densidade", "geometria")
+    col = {k: [] for k in nomes}
+    sem_geometria = 0
+    for r in linhas.toLocalIterator():
+        g = geo.de_wkb(r["wkb"])
+        web = poligonos_web(g, TOLERANCIA_SETOR_M) if g else []
+        if not web:
+            sem_geometria += 1
+            continue
+        col["id"].append(r["id"])
+        col["distrito"].append(r["distrito"])
+        col["situacao"].append(r["situacao"])
+        col["favela"].append(bool(r["favela"]))
+        col["pessoas"].append(r["pessoas"])
+        col["domicilios"].append(r["domicilios"])
+        col["area_km2"].append(None if r["area_km2"] is None else round(r["area_km2"], 4))
+        col["densidade"].append(None if r["densidade"] is None else round(r["densidade"]))
+        col["geometria"].append(web)
+    if not col["id"]:
+        raise RuntimeError("A Gold do IBGE não gerou setores com geometria.")
+    pessoas = sum(v or 0 for v in col["pessoas"])
+    data_ref = cod_para_data(ref).isoformat()
+    meta = dataset_meta(
+        "setores", "Setores censitários (IBGE)", "oficial", fonte, "Dados públicos do IBGE.", [dim, fato], len(col["id"]), qualidade,
+        data_referencia=data_ref, granularidade={"espacial": "setor censitário", "temporal": f"Censo 2022 (referência {data_ref})"},
+        extra={"unidade": "pessoas e domicílios; densidade em hab/km²", "pessoas_total": pessoas,
+               "domicilios_total": sum(v or 0 for v in col["domicilios"]), "registros_descartados": sem_geometria,
+               "simplificacao_m": TOLERANCIA_SETOR_M,
+               "observacao": "Dados agregados por setor censitário: não identificam pessoas nem permitem inferir exposição individual."},
+    )
+    corpo, entrada = pacote("setores.json", meta, col)
+    print(f"IBGE: {len(col['id'])} setores ({sem_geometria} sem geometria), {pessoas} pessoas; {len(corpo) / 1024 / 1024:.1f} MB; "
+          f"qualidade {qualidade['estado']}")
+    return {
+        "arquivos": {"setores.json": corpo}, "datasets": [entrada],
+        "linhagem": [{"fonte": "IBGE", "tabelas": ["bronze.ibge_census_tracts", "silver.ibge_census_tracts", "gold.fact_ibge_census_tract_population"],
+                      "publicado_na_web": True, "processado_em": AGORA, "qualidade": qualidade["estado"], "avisos": qualidade["avisos"]}],
+    }
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## OpenStreetMap: vias principais
+# MAGIC
+# MAGIC Só as vias de hierarquia 1 a 5 (expressas, arteriais, coletoras e seus acessos). Ruas locais, vias de serviço, caminhos de pedestres e trilhas ficam de fora: são a maior parte das centenas de milhares de vias e não cabem num arquivo estático leve. Dados © colaboradores do OpenStreetMap, ODbL 1.0.
+
+# COMMAND ----------
+
+
+def exportar_osm():
+    qualidade = qualidade_gold("osm")
+    dim = f"{CATALOG}.gold.dim_osm_roads"
+    dim_classe = f"{CATALOG}.gold.dim_osm_road_class"
+    fonte = {"id": "osm", "nome": "OpenStreetMap (Geofabrik)", "url": "https://www.openstreetmap.org/copyright"}
+    base = (spark.table(dim).alias("v")
+            .join(spark.table(dim_classe).alias("c"), F.col("v.COD_DIM_CLASSE_VIA") == F.col("c.COD_DIM_CLASSE_VIA"), "left")
+            .where(F.col("v.COD_DIM_VIA") != -1))
+    total = base.agg(F.count("*").alias("n"), F.sum("v.NUM_COMPRIMENTO_KM").alias("km")).first()
+    linhas = (
+        base.where(F.col("c.NUM_HIERARQUIA").between(1, HIERARQUIA_VIAS_MAX) & F.col("v.GEO_WKB").isNotNull())
+        .select(F.col("v.NUM_OSM_ID").alias("id"), F.col("v.NOM_VIA").alias("nome"), F.col("v.COD_REFERENCIA").alias("ref"),
+                F.col("c.DSC_CLASSE").alias("classe"), F.col("c.NUM_HIERARQUIA").alias("hierarquia"), F.col("v.FLG_PONTE").alias("ponte"),
+                F.col("v.FLG_TUNEL").alias("tunel"), F.col("v.NUM_COMPRIMENTO_KM").alias("km"), F.col("v.GEO_WKB").alias("wkb"))
+        .orderBy("id")
+    )
+    nomes = ("id", "nome", "ref", "classe", "hierarquia", "ponte", "tunel", "km", "geometria")
+    col = {k: [] for k in nomes}
+    for r in linhas.toLocalIterator():
+        g = geo.de_wkb(r["wkb"])
+        web = linhas_web(g, TOLERANCIA_VIA_M) if g else []
+        if not web:
+            continue
+        col["id"].append(r["id"])
+        col["nome"].append(r["nome"])
+        col["ref"].append(r["ref"])
+        col["classe"].append(r["classe"])
+        col["hierarquia"].append(r["hierarquia"])
+        col["ponte"].append(bool(r["ponte"]))
+        col["tunel"].append(bool(r["tunel"]))
+        col["km"].append(None if r["km"] is None else round(r["km"], 3))
+        col["geometria"].append(web)
+    if not col["id"]:
+        raise RuntimeError("A Gold do OSM não gerou vias principais com geometria.")
+    km = sum(v or 0 for v in col["km"])
+    meta = dataset_meta(
+        "vias", "Rede viária principal (OpenStreetMap)", "colaborativo", fonte,
+        "© colaboradores do OpenStreetMap, ODbL 1.0: exige atribuição; base derivada distribuída fica sob a ODbL.",
+        [dim, dim_classe], len(col["id"]), qualidade,
+        granularidade={"espacial": "trecho de via (way do OSM)", "temporal": "extrato da Geofabrik"},
+        extra={"unidade": "km", "km_publicados": round(km, 1), "vias_total": total["n"], "km_total": round(total["km"] or 0, 1),
+               "hierarquia_max": HIERARQUIA_VIAS_MAX, "simplificacao_m": TOLERANCIA_VIA_M,
+               "observacao": f"Só vias de hierarquia 1 a {HIERARQUIA_VIAS_MAX} (expressas, arteriais, coletoras e acessos): "
+                             f"{len(col['id'])} de {total['n']} vias, {km:.0f} de {total['km'] or 0:.0f} km. Sem roteamento nem trânsito."},
+    )
+    corpo, entrada = pacote("vias.json", meta, col)
+    print(f"OSM: {len(col['id'])} vias principais de {total['n']} ({len(corpo) / 1024 / 1024:.1f} MB); qualidade {qualidade['estado']}")
+    return {
+        "arquivos": {"vias.json": corpo}, "datasets": [entrada],
+        "linhagem": [{"fonte": "OpenStreetMap", "tabelas": ["bronze.osm_roads", "silver.osm_roads", "gold.dim_osm_roads"],
+                      "publicado_na_web": True, "processado_em": AGORA, "qualidade": qualidade["estado"], "avisos": qualidade["avisos"]}],
+    }
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Execução por fonte
 
 # COMMAND ----------
@@ -433,8 +660,23 @@ def tentar(nome, fn):
         return None
 
 
+def incluir(r, ids):
+    global datasets, linhagem
+    arquivos.update(r["arquivos"])
+    datasets += r["datasets"]
+    linhagem += r["linhagem"]
+    publicados.update(ids)
+
+
+indice_susc = None
+if "sgb" in FONTES:
+    r = tentar("sgb", exportar_sgb)
+    if r:
+        incluir(r, {"suscetibilidade"})
+        indice_susc = r["indice"]
+
 if "geosampa" in FONTES:
-    r = tentar("geosampa", exportar_geosampa)
+    r = tentar("geosampa", lambda: exportar_geosampa(indice_susc))
     if r:
         arquivos.update(r["arquivos"])
         datasets += r["datasets"]
@@ -478,6 +720,12 @@ if chuva_res:
     datasets.append(entrada)
     publicados.add("estacoes")
 
+for fonte_geo, exportador, conjunto in (("ibge", exportar_ibge, "setores"), ("osm", exportar_osm, "vias")):
+    if fonte_geo in FONTES:
+        r = tentar(fonte_geo, exportador)
+        if r:
+            incluir(r, {conjunto})
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -493,6 +741,7 @@ FONTES_DO_CONJUNTO = {
     "subprefeituras": ("geosampa",), "ocorrencias": ("geosampa",),
     "chuva_diaria": ("chuva", "cemaden", "sibh", "inmet"), "chuva_horaria": ("chuva", "cemaden", "sibh", "inmet"),
     "estacoes": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh", "chuva"),
+    "suscetibilidade": ("sgb",), "setores": ("ibge",), "vias": ("osm",),
 }
 token = dbutils.secrets.get(scope="github", key="token") if GITHUB_PUBLICAR else None
 atual = github_publish.ler_json(token, GITHUB_REPO, GITHUB_BRANCH, f"{PASTA_SITE}/manifest.json") if token else None
@@ -508,14 +757,13 @@ if not datasets:
     raise RuntimeError("Nada foi exportado: " + "; ".join(f"{n}: {m}" for n, m, _ in falhas))
 CATALOGO_NAO_PUBLICADO = [
     ("chuva", "Chuva observada", "chuva_diaria"), ("nivel", "Nível de rios e córregos", "nivel"),
-    ("suscetibilidade", "Suscetibilidade a inundações", None), ("avisos_oficiais", "Avisos oficiais", None),
-    ("limites", "Limites administrativos", None), ("setores", "Setores censitários (IBGE)", None), ("vias", "Rede viária (OpenStreetMap)", None),
+    ("suscetibilidade", "Suscetibilidade a inundações", "suscetibilidade"), ("avisos_oficiais", "Avisos oficiais", None),
+    ("limites", "Limites administrativos", None), ("setores", "Setores censitários (IBGE)", "setores"),
+    ("vias", "Rede viária (OpenStreetMap)", "vias"),
 ]
 MOTIVOS_FIXOS = {
-    "suscetibilidade": "O cruzamento e os polígonos do SGB serão publicados em etapa posterior.",
     "avisos_oficiais": "Nenhuma fonte de avisos está integrada ao pipeline.",
-    "limites": "A Gold contém o cadastro das subprefeituras, mas não a geometria dos limites.",
-    "setores": "Camada ainda não exportada para a web.", "vias": "Camada ainda não exportada para a web.",
+    "limites": "A Gold não tem a geometria das subprefeituras nem dos distritos.",
 }
 nao_publicados = []
 for id_, titulo, ds in CATALOGO_NAO_PUBLICADO:
@@ -524,7 +772,8 @@ for id_, titulo, ds in CATALOGO_NAO_PUBLICADO:
     if id_ in MOTIVOS_FIXOS:
         motivo = MOTIVOS_FIXOS[id_]
     else:
-        fontes_rel = {"chuva": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh")}[id_]
+        fontes_rel = {"chuva": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh"), "suscetibilidade": ("sgb",),
+                      "setores": ("ibge",), "vias": ("osm",)}[id_]
         erros = [f"{n}: {MOTIVO_FALHA[n]}" for n in fontes_rel if n in MOTIVO_FALHA]
         motivo = ("Falhou nesta execução (" + "; ".join(erros) + ").") if erros else "Fonte não incluída nesta publicação."
     nao_publicados.append({"id": id_, "titulo": titulo, "motivo": motivo})
