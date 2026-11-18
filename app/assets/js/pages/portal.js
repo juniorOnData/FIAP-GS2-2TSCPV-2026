@@ -1,11 +1,9 @@
 // Portal institucional (PDR 12.2): composição editorial e chamadas.
 import { icon, LOGO } from "../icons.js";
-import { isDemo, getManifest } from "../data.js";
-import { esc, fmtDateTime } from "../util.js";
+import { isDemo } from "../data.js";
 
 export default {
   async render(root) {
-    const m = getManifest();
     root.innerHTML = `
     ${isDemo() ? `<div class="demo-banner" role="note">${icon("flask")}<span><strong>Modo demonstração.</strong> Os painéis usam dados sintéticos, sem conexão com dados reais nem com órgãos oficiais.</span></div>` : ""}
     <div class="portal">
@@ -48,18 +46,8 @@ export default {
         </div>
       </section>
 
-      <section class="portal__inner portal__sources" aria-labelledby="src-title">
-        <h2 id="src-title" class="portal__h3">Fontes integradas no pipeline</h2>
-        <p class="muted">Processadas no Databricks (Unity Catalog <code>fiap_analytics</code>) em camadas Bronze, Silver e Gold.</p>
-        <ul class="portal__logos">
-          ${["GeoSampa", "CEMADEN", "SIBH / SP Águas", "SGB/CPRM", "IBGE — Censo 2022", "OpenStreetMap", "INMET"].map((s) => `<li>${esc(s)}</li>`).join("")}
-        </ul>
-        <p class="note">Publicação de dados: ${esc(m?.versao || "—")} · referência ${esc(fmtDateTime(m?.referencia))}${isDemo() ? " · pacote de demonstração" : ""}.</p>
-      </section>
-
       <footer class="portal__foot">
-        <div class="portal__inner row" style="justify-content:space-between">
-          <span>ChuvaSegura-SP · FIAP GS2 2TSCPV 2026</span>
+        <div class="portal__inner row">
           <span>Mapa base © CARTO · © colaboradores do OpenStreetMap (ODbL)</span>
         </div>
       </footer>

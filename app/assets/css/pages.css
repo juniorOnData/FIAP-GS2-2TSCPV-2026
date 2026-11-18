@@ -19,9 +19,6 @@
 .portal__inner { max-width: var(--content-max); margin: 0 auto; padding: 0 var(--s-5); }
 .portal__h2 { font-size: clamp(24px, 3vw, 36px); font-weight: 800; max-width: 880px; letter-spacing: -0.02em; }
 .portal__h3 { font-size: var(--fs-xl); margin-bottom: var(--s-2); }
-.portal__sources { padding-top: var(--s-7); padding-bottom: var(--s-7); }
-.portal__logos { list-style: none; padding: 0; margin: var(--s-4) 0; display: flex; flex-wrap: wrap; gap: var(--s-3); }
-.portal__logos li { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--s-3) var(--s-4); font-weight: 600; font-size: var(--fs-md); }
 .portal__foot { border-top: 1px solid var(--border); padding: var(--s-5) 0; font-size: var(--fs-xs); color: var(--text-3); }
 .feature svg { width: 28px; height: 28px; color: var(--royal); margin-bottom: var(--s-3); }
 .feature h3 { margin-bottom: var(--s-2); }
