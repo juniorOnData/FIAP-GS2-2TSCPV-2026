@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_sibh_measurements_landing
 # MAGIC
+# MAGIC ## Funções de ingestão
+# MAGIC
+# MAGIC `throttle`, `fmt` e `batches` controlam o ritmo, a formatação de datas e os grupos de sensores por chamada; `get_measurements` consulta a API. `parse_last_measurement` interpreta o último instante informado pelo serviço. As funções de calendário e manifesto (`month_start`, `next_month`, `to_month_key`, `month_paths`, `read_manifest`, `is_complete` e `incomplete_months`) determinam as janelas pendentes. `download_month` coleta os lotes do mês, grava os dados e finaliza o manifesto.
+# MAGIC
 # MAGIC Baixa as medições de chuva e nível do SIBH (SP Águas) para os sensores da capital e grava no volume `fiap_analytics.bronze.sibh_measurements`.
 # MAGIC
 # MAGIC Fonte: `GET https://cth.daee.sp.gov.br/sibh/api/v2/measurements` (pública, sem autenticação).

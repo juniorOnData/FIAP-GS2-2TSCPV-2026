@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 02_inmet_weather_bronze
 # MAGIC
+# MAGIC ## Funções de leitura
+# MAGIC
+# MAGIC `sem_acento` e `nome_coluna` normalizam os cabeçalhos para localizar variáveis apesar das diferenças de acentuação e grafia entre arquivos anuais. `ler_csv_inmet` interpreta o cabeçalho de metadados da estação e as linhas horárias, preservando os valores de origem para a Silver.
+# MAGIC
 # MAGIC Carrega os CSVs horários do INMET do volume `fiap_analytics.bronze.inmet_weather` para a tabela `fiap_analytics.bronze.inmet_weather_readings`.
 # MAGIC
 # MAGIC Regras:

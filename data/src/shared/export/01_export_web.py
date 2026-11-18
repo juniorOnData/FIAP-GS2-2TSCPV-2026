@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 01_export_web
 # MAGIC
+# MAGIC ## Funções do notebook
+# MAGIC
+# MAGIC `qualidade_gold` impede a exportação de uma fonte sem validação aprovada nesta execução. `dataset_meta` monta os metadados do conjunto publicado e `pacote` serializa os dados e calcula seu hash. `dentro` confere se uma coordenada está no recorte do município; `cadastro_redes` prepara as estações e `linhas_chuva_horaria` monta as séries por hora. `exportar_geosampa`, `exportar_estacoes_e_chuva` e `exportar_nivel` produzem os arquivos das respectivas fontes. `tentar` registra falhas por fonte para que as demais ainda possam ser avaliadas antes da publicação.
+# MAGIC
 # MAGIC Última etapa do job `ChuvaSegura`: publica as tabelas Gold no contrato estático do site (`app/DATA_CONTRACT.md`) e envia o pacote ao GitHub, de onde a Vercel republica o site.
 # MAGIC
 # MAGIC 1. Roda depois de todas as fontes (`run_if: ALL_DONE`).

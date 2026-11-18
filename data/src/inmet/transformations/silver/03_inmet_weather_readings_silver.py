@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_inmet_weather_readings_silver
 # MAGIC
+# MAGIC ## Funções de transformação
+# MAGIC
+# MAGIC `ultima_carga_por_ano` identifica os anos Bronze novos ou alterados. `medida` converte valores numéricos e trata o código de ausência usado pelo INMET. `transformar` padroniza as variáveis, converte o horário de fim de observação no intervalo horário correspondente e prepara a data e hora local.
+# MAGIC
 # MAGIC Carrega a Silver das medições horárias do INMET (`fiap_analytics.silver.inmet_weather_readings`) a partir da Bronze, ano a ano.
 # MAGIC
 # MAGIC Regras:

@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_osm_roads_silver
 # MAGIC
+# MAGIC ## Funções de transformação
+# MAGIC
+# MAGIC `inteiro` converte atributos numéricos do shapefile; `flag` padroniza atributos booleanos e categóricos de presença. `transformar` percorre as vias, normaliza os campos e calcula os atributos espaciais usados na análise, como extensão em metros.
+# MAGIC
 # MAGIC Recria a Silver das vias do OpenStreetMap (`fiap_analytics.silver.osm_roads`) a partir da Bronze: uma linha por via, com atributos tipados e geometria padronizada.
 # MAGIC
 # MAGIC Regras:

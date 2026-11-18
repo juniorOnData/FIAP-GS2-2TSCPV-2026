@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 04_sibh_measurements_bronze
 # MAGIC
+# MAGIC ## Funções de carga
+# MAGIC
+# MAGIC `list_landing_months` lista as janelas mensais concluídas na landing. `read_month` interpreta os arquivos JSON por linha e associa a janela lida. `validate_month` compara os registros com o manifesto antes de substituir a fatia mensal na Bronze.
+# MAGIC
 # MAGIC Carrega as medições do SIBH do volume `fiap_analytics.bronze.sibh_measurements` para a tabela `fiap_analytics.bronze.sibh_measurements`.
 # MAGIC
 # MAGIC Regras (mesmo padrão das leituras do CEMADEN):

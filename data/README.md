@@ -250,6 +250,8 @@ Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` co
 
 ## Ordem de execução
 
+Para conhecer a implementação dos notebooks e as funções de cada fonte, consulte a [Documentação Técnica - Pipelines de Dados](PIPELINES_TECNICOS.md).
+
 ### CEMADEN
 
 O cadastro de estações e as leituras de chuva seguem em paralelo até a Silver. Daí em diante, a qualidade da Silver barra a Gold.

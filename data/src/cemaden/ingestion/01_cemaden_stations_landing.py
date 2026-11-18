@@ -10,6 +10,10 @@
 # MAGIC 2. Uma coleta por dia em `data_coleta=AAAA-MM-DD/`, em JSON por linha comprimido (gzip). Rodar de novo no mesmo dia sobrescreve o arquivo do dia.
 # MAGIC 3. Manifesto gravado por último (contagem, SHA256, campos), usado na conferência da Bronze.
 # MAGIC 4. Uma linha no `cemaden_ingestion_log` (etapa `landing`).
+# MAGIC
+# MAGIC ## Funções e classes
+# MAGIC
+# MAGIC `TokenManager` obtém e renova o token SGAA; `throttle` respeita o intervalo mínimo entre chamadas. `ped_get` aplica retentativas para falhas de rede, HTTP 429 e respostas 5xx e sinaliza erros de autenticação para renovação do token. `parse_body` interpreta a resposta JSON e reconhece listas retornadas diretamente ou em campos como `data` e `items`. `collect` percorre as páginas da PED. `validate` verifica que a coleta contém registros JSON e códigos de estação antes da gravação.
 
 # COMMAND ----------
 
