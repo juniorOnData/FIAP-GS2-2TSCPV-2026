@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 05_sgb_gold_quality
 # MAGIC
+# MAGIC ## Função de validação
+# MAGIC
+# MAGIC `membro_desconhecido` verifica se cada dimensão mantém exatamente um registro com chave substituta `-1`, usado para representar membros desconhecidos ou sem correspondência.
+# MAGIC
 # MAGIC Regras de qualidade da Gold do SGB: `dim_sgb_susceptibility_class` e `dim_sgb_susceptibility_areas`. Roda depois de `05_dim_sgb_susceptibility_areas`.
 # MAGIC
 # MAGIC 1. Regras `ERRO` que falham param a tarefa e o job.

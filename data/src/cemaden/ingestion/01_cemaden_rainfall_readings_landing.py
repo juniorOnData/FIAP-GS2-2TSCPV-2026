@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 01_cemaden_rainfall_readings_landing
 # MAGIC
+# MAGIC ## Funções e classes
+# MAGIC
+# MAGIC `log` registra mensagens com horário UTC. `jwt_expiracao` lê a validade do JWT. `GerenciadorToken` obtém e renova o token SGAA; `LimitadorTaxa` aplica o intervalo entre chamadas; `get_ped` concentra as retentativas HTTP e trata falhas de autenticação. `limites_mes`, `proximo_mes` e `lista_meses` calculam as janelas mensais; `buscar_mes` percorre as páginas da API; `gravar_mes` salva JSON por linha e devolve o hash do arquivo. `contar_duplicados` conta chaves repetidas de estação, instante e sensor; `mes_fechado` aplica a carência para leituras atrasadas.
+# MAGIC
 # MAGIC Baixa as leituras de chuva da rede CEMADEN no município de São Paulo pela API PED (`pcds/pcds-dados-pg`) e grava um arquivo por mês no volume `fiap_analytics.bronze.cemaden_rainfall_readings`.
 # MAGIC
 # MAGIC Modos (widget `modo`):

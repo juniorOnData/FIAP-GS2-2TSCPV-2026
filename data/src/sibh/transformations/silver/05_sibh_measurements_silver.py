@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 05_sibh_measurements_silver
 # MAGIC
+# MAGIC ## Funções de transformação
+# MAGIC
+# MAGIC `ultima_carga_por_mes` identifica janelas Bronze novas ou atualizadas; `versao_gravada` verifica se a Silver precisa de reprocessamento por mudança de lógica. `com_vizinhos` inclui meses adjacentes para resolver leituras repetidas na virada do mês. `chaves_do_mes` atribui cada leitura a uma janela canônica, `grandeza` classifica chuva ou nível e `transformar` tipa os dados, deriva o calendário local e remove duplicidades.
+# MAGIC
 # MAGIC Carrega a Silver das medições de chuva e nível do SIBH (`fiap_analytics.silver.sibh_measurements`) a partir da Bronze, mês a mês.
 # MAGIC
 # MAGIC Regras:

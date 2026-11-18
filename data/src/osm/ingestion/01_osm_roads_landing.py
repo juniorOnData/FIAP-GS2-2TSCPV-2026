@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 01_osm_roads_landing
 # MAGIC
+# MAGIC ## Função de versão
+# MAGIC
+# MAGIC `data_do_extrato` extrai a data do nome final do arquivo após o redirecionamento de `latest`. Essa versão é registrada no manifesto para identificar o extrato utilizado e evitar uma nova ingestão quando o arquivo não mudou.
+# MAGIC
 # MAGIC Baixa da Geofabrik a rede viária do OpenStreetMap da região Sudeste (camada `gis_osm_roads_free_1` do extrato *free shapefile*) e grava no volume `fiap_analytics.bronze.osm_roads`.
 # MAGIC
 # MAGIC Fonte: `https://download.geofabrik.de/south-america/brazil/sudeste-latest-free.shp.zip`. O endereço `latest` redireciona para o extrato do dia (`sudeste-AAMMDD-free.shp.zip`, cerca de 2,2 GB com todas as camadas).

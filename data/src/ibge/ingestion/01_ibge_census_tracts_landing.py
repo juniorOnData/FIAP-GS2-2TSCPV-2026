@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 01_ibge_census_tracts_landing
 # MAGIC
+# MAGIC ## Função de conferência
+# MAGIC
+# MAGIC `contar_setores` abre a camada do GeoPackage, conta as feições disponíveis e confere se há setores do município esperado antes de validar o arquivo baixado.
+# MAGIC
 # MAGIC Baixa do IBGE a malha de setores censitários do Censo Demográfico 2022 com os atributos básicos do universo (pessoas e domicílios por setor) do estado de São Paulo e grava no volume `fiap_analytics.bronze.ibge_census_tracts`.
 # MAGIC
 # MAGIC Fonte: `SP_setores_CD2022.gpkg` da pasta *Agregados por Setores Censitários / malha com atributos* do FTP do IBGE (GeoPackage, cerca de 180 MB). Um só arquivo traz o polígono do setor e as variáveis V0001 a V0007 (total de pessoas, domicílios, domicílios particulares e coletivos, média de moradores, percentual de domicílios imputados e domicílios particulares ocupados).

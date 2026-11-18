@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 07_sibh_gold_quality
 # MAGIC
+# MAGIC ## Funções de validação
+# MAGIC
+# MAGIC `silver_por_mes` resume a Silver por mês e grandeza para comparar com as fatos Gold. `regras_da_fato` monta as verificações comuns de cada fato, incluindo integridade das chaves e coerência entre totais da Silver e da Gold.
+# MAGIC
 # MAGIC Regras de qualidade da Gold do SIBH: as fatos `fact_sibh_rainfall_hourly` e `fact_sibh_level_hourly` e a dimensão `dim_sibh_sensors`. Roda depois das duas fatos.
 # MAGIC
 # MAGIC 1. Regras `ERRO` que falham param a tarefa e o job.

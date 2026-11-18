@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_cemaden_rainfall_readings_silver
 # MAGIC
+# MAGIC ## Funções de transformação
+# MAGIC
+# MAGIC `ultima_carga_por_mes` identifica as janelas Bronze alteradas desde a Silver. `versao_gravada` lê a versão registrada na tabela para decidir se o código exige reprocessamento completo. `transformar(mes)` tipa os registros do mês, deriva data e hora locais, preserva o valor recebido, sinaliza chuva negativa e remove duplicidades mantendo a carga mais recente.
+# MAGIC
 # MAGIC Carrega a Silver das leituras de chuva do CEMADEN (`fiap_analytics.silver.cemaden_rainfall_readings`) a partir da Bronze, mês a mês.
 # MAGIC
 # MAGIC Regras:
