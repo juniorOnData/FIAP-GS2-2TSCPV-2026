@@ -61,7 +61,7 @@ app/
 
 | Requisito | Situação |
 |---|---|
-| F01–F05 mapa, camadas, agrupamentos, filtros, detalhe | Feito: ocorrências agrupadas, chuva (1 h/24 h/72 h/período), nível, suscetibilidade; limites, setores e vias aparecem desabilitados com o motivo |
+| F01–F05 mapa, camadas, agrupamentos, filtros, detalhe | Feito: ocorrências em hexágonos no zoom afastado e com ícone por tipo no zoom próximo, faixa de indicadores e legenda fixa sobre o mapa, filtros em seções recolhíveis; chuva (1 h/24 h/72 h/período), nível, suscetibilidade, densidade e vias |
 | F06 indicadores · F13 central de painéis | Feito. O mapa é a entrada da plataforma |
 | Alertas da plataforma | Regras fixas sobre chuva e nível observados (não oficiais), com reconhecimento e tratamento salvos só no navegador. Envio por SMS ainda não configurado: exige serviço no servidor e login de operador |
 | F07 chuva por estação e janela | Feito, com estado de atualização |
