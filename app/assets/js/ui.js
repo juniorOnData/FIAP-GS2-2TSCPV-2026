@@ -109,7 +109,8 @@ export const subprefNome = (sig) => subprefs.find((s) => s.sigla === sig)?.nome 
 export const getSubprefeituras = () => subprefs;
 
 // Barra de filtros compartilhada. `show` controla quais dimensões aparecem.
-export function filterBar({ show = ["periodo", "tipo", "subprefeitura", "rede"], id = "fb" } = {}) {
+// compacto: rótulos só para leitores de tela e sem a linha de resumo (cabeçalho do mapa; as opções já dizem o filtro).
+export function filterBar({ show = ["periodo", "tipo", "subprefeitura", "rede"], id = "fb", compacto = false } = {}) {
   const f = store.filters;
   const { ref, first } = store.bounds;
   const anos = [];
@@ -163,10 +164,11 @@ export function filterBar({ show = ["periodo", "tipo", "subprefeitura", "rede"],
   if (show.includes("rede") && f.rede) chips.push(`<span class="chip">Rede ${esc(f.rede)}</span>`);
   const dirty = f.periodo !== "12m" || f.tipos.length || f.subprefeitura || f.rede;
 
-  return `<form class="filterbar" id="${id}" role="search" aria-label="Filtros do recorte" onsubmit="return false">
-    ${parts.join("")}
-    ${dirty ? `<button type="button" class="btn btn--ghost btn--sm" data-reset>${icon("reset")}Limpar filtros</button>` : ""}
-    <div class="filterbar__summary" aria-live="polite">Recorte ativo: ${chips.join("")}<span>Os filtros valem para mapa, indicadores e séries.</span></div>
+  const campos = compacto ? parts.join("").replaceAll("<label for=", '<label class="sr-only" for=') : parts.join("");
+  return `<form class="filterbar ${compacto ? "filterbar--compacto" : ""}" id="${id}" role="search" aria-label="Filtros do recorte" onsubmit="return false">
+    ${campos}
+    ${dirty ? `<button type="button" class="btn btn--ghost btn--sm" data-reset>${icon("reset")}${compacto ? "Limpar" : "Limpar filtros"}</button>` : ""}
+    ${compacto ? "" : `<div class="filterbar__summary" aria-live="polite">Recorte ativo: ${chips.join("")}<span>Os filtros valem para mapa, indicadores e séries.</span></div>`}
   </form>`;
 }
 

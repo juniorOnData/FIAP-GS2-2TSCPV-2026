@@ -6,20 +6,22 @@ import { store, resolvePeriod } from "../store.js";
 import { getOccurrences, filterOccurrences, getStations, filterStations, rainInPeriod, rainLastHours, load, bboxOf, isDemo, getManifest, hourlyTimes, serieNivel } from "../data.js";
 import { filterBar, bindFilterBar, subprefNome, stateBlock, resultState, natureBadge, freshnessBadge, badge, provenance, DEMO_MSG } from "../ui.js";
 import { sparkline, TYPE_COLORS } from "../charts.js";
-import { hexbin, quebras, raioPorZoom, ZOOM_PONTOS } from "../hexbin.js";
-import { REDES_EM_REVISAO } from "../regras-alerta.js";
 
 // Rampa de chuva para o mapa: começa num azul visível sobre o mapa base claro (o branco fica para "sem leitura").
 const RAIN_RAMP = ["#DCEBFC", "#B7D3F6", "#86B6EF", "#5598E7", "#2A78D6", "#1C5CAB", "#104281", "#0D366B"];
-import { computeInsights, insightCard } from "../insights.js";
+import { computeInsights } from "../insights.js";
 
 const SUSC_COLORS = { 1: "#E4DEFB", 2: "#B4A7EF", 3: "#6250D6" };
 // Densidade (hab/km²): rampa sequencial de um só tom, distinta da chuva (azul), do nível (verde) e da suscetibilidade (violeta).
 const DENS_BREAKS = [1000, 5000, 10000, 15000, 20000, 30000];
 const DENS_RAMP = ["#F6EFE4", "#EADBC2", "#DCC39E", "#CBA77A", "#B48A58", "#946B3E", "#6F4E2A"];
 const VIA_COR = "#334155";
-// Ocorrências agregadas em hexágonos: rampa sequencial de um só tom (ardósia), a mesma cor-base das ocorrências.
-const HEX_RAMP = ["#DDE3EC", "#B3BED0", "#8494AF", "#56668A", "#2B3A5C"];
+// Subprefeituras coloridas pela contagem: rampa sequencial de um só tom (ardósia), a cor-base das ocorrências.
+const SUB_RAMP = ["#DDE3EC", "#B3BED0", "#8494AF", "#56668A", "#2B3A5C"];
+// Mancha de densidade das ocorrências: rampa sequencial de laranja, transparente onde há pouca concentração.
+const DENSIDADE_CORES = [[0, "rgba(255,245,235,0)"], [0.15, "rgba(253,212,170,0.35)"], [0.4, "rgba(253,160,90,0.5)"],
+  [0.65, "rgba(241,105,19,0.62)"], [0.85, "rgba(217,72,1,0.72)"], [1, "rgba(166,54,3,0.8)"]];
+const ZOOM_PONTOS = 14; // a partir daqui cada ocorrência aparece com o ícone do tipo
 // Camadas pesadas (vários MB): só são baixadas quando o usuário liga a camada.
 const SOB_DEMANDA = { setores: "setores", vias: "vias", hidrografia: "hidrografia" };
 // Hidrografia: azul de linha (cursos) e preenchimento claro (corpos), distintos dos círculos de chuva pelo formato.
@@ -37,9 +39,7 @@ const view = {
   layers: { ocorrencias: true, chuva: true, nivel: false, suscetibilidade: false, limites: true, hidrografia: true, setores: false, vias: false },
   coropletico: false,
   subBreaks: [],
-  hexRaio: null,
-  hexBreaks: [],
-  hexCells: new Map(),
+  ocModo: "densidade", // ou "pontos"
   rainWindow: "24h",
   basemapOk: true,
 };
@@ -51,42 +51,52 @@ export default {
     lastSubpref = null;
     if (params.get("camada")) view.layers[params.get("camada")] = true;
     root.innerHTML = `<div class="page page--full"><div class="mapview" id="mapview">
-      <aside class="mapside" id="mapside" aria-label="Camadas, filtros e insights">
-        <button type="button" class="mapside__toggle btn btn--neutral" id="side-toggle" aria-expanded="false" aria-controls="mapside-body">${icon("layers")}Camadas, filtros e insights</button>
-        <div class="mapside__body" id="mapside-body">
-          <details class="mapside__sec" open><summary class="mapside__h">${icon("filter")}Filtros</summary><div id="m-filters"></div></details>
-          <details class="mapside__sec" open><summary class="mapside__h">${icon("layers")}Camadas</summary><div id="m-layers"></div></details>
-          <details class="mapside__sec" open><summary class="mapside__h">${icon("sparkle")}Insights do recorte</summary><p class="note">Padrões descritivos dos dados filtrados. Não são previsões nem alertas.</p><div id="m-insights">${stateBlock("loading", "Calculando…")}</div></details>
-          <details class="mapside__sec"><summary class="mapside__h">${icon("table")}Registros no recorte</summary><div id="m-list"></div></details>
+      <div class="maphead">
+        <div id="m-filters" class="maphead__filtros"></div>
+        <div class="maphead__acoes">
+          <div class="menu-camadas">
+            <button type="button" class="btn btn--neutral btn--sm" id="m-camadas-btn" aria-expanded="false" aria-controls="m-layers">${icon("layers")}Camadas <span class="menu-camadas__n" id="m-camadas-n"></span></button>
+            <div class="menu-camadas__painel" id="m-layers" hidden></div>
+          </div>
+          <button type="button" class="btn btn--ghost btn--sm btn--icon" id="m-export" title="Exportar as ocorrências do recorte (CSV)" aria-label="Exportar as ocorrências do recorte (CSV)">${icon("download")}</button>
         </div>
-      </aside>
+      </div>
       <div class="mapwrap">
         <div id="map" class="map" role="region" aria-label="Mapa do município de São Paulo. Use as setas para mover e + ou − para aproximar."></div>
-        <div class="map-overlay map-overlay--tl"><div id="m-scope" aria-live="polite"></div><div id="m-notice"></div></div>
+        <div class="map-overlay map-overlay--tl" id="m-notice"></div>
+        <div class="map-overlay map-overlay--tr" id="m-insights"></div>
         <div class="map-overlay map-overlay--bl" id="m-legend"></div>
         ${isDemo() ? `<div class="map-demo">${icon("flask")}Demonstração · dados sintéticos</div>` : ""}
+        <aside class="detail" id="detail" aria-label="Detalhe do elemento selecionado" hidden>
+          <div class="detail__head"><h3 id="detail-title">Detalhe</h3><button type="button" class="btn btn--neutral btn--icon btn--sm" id="detail-close" aria-label="Fechar detalhe">${icon("close")}</button></div>
+          <div class="detail__body" id="detail-body"></div>
+        </aside>
       </div>
-      <aside class="detail" id="detail" aria-label="Detalhe do elemento selecionado" hidden>
-        <div class="detail__head"><h3 id="detail-title">Detalhe</h3><button type="button" class="btn btn--neutral btn--icon btn--sm" id="detail-close" aria-label="Fechar detalhe">${icon("close")}</button></div>
-        <div class="detail__body" id="detail-body"></div>
-      </aside>
     </div></div>`;
 
-    $("#side-toggle").addEventListener("click", (e) => {
-      const open = $("#mapside").classList.toggle("is-open");
-      e.currentTarget.setAttribute("aria-expanded", String(open));
-    });
+    const botaoCamadas = $("#m-camadas-btn");
+    const abrirCamadas = (abrir) => {
+      $("#m-layers").hidden = !abrir;
+      botaoCamadas.setAttribute("aria-expanded", String(abrir));
+    };
+    botaoCamadas.addEventListener("click", () => abrirCamadas($("#m-layers").hidden));
+    // composedPath: o painel é redesenhado a cada escolha, e o elemento clicado já saiu da página quando o evento chega aqui.
+    root.addEventListener("click", (e) => !e.composedPath().some((el) => el.classList?.contains("menu-camadas")) && abrirCamadas(false));
+    $("#m-export").addEventListener("click", () => exportCsv(currentOcc()));
     $("#detail-close").addEventListener("click", closeDetail);
-    root.addEventListener("keydown", (e) => e.key === "Escape" && !$("#detail")?.hidden && closeDetail());
+    root.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (!$("#m-layers").hidden) { abrirCamadas(false); botaoCamadas.focus(); } else if (!$("#detail")?.hidden) closeDetail();
+    });
 
     const [occ, st, susc, nivel, limites] = await Promise.all([getOccurrences(), getStations(), load("suscetibilidade"), load("nivel"), load("limites")]);
     ctx = { occ, st, susc, nivel, limites, setores: null, vias: null, hidrografia: null };
     renderFilters();
     renderLayersPanel();
-    renderSideContent();
+    renderInsights();
 
     if (!window.maplibregl) {
-      $("#map").innerHTML = `<div style="padding:24px;max-width:520px">${stateBlock("error", "O componente de mapa não carregou", "A biblioteca MapLibre não respondeu. Os indicadores, insights e a lista de registros continuam disponíveis ao lado.")}</div>`;
+      $("#map").innerHTML = `<div style="padding:24px;max-width:520px">${stateBlock("error", "O componente de mapa não carregou", "A biblioteca MapLibre não respondeu. Os filtros e os insights continuam disponíveis.")}</div>`;
       return () => {};
     }
     const style = await loadBasemap();
@@ -118,7 +128,7 @@ export default {
     const focusId = document.activeElement?.id;
     renderFilters();
     renderLayersPanel();
-    renderSideContent();
+    renderInsights();
     if (map?.isStyleLoaded()) refreshData();
     if (focusId) document.getElementById(focusId)?.focus();
   },
@@ -227,9 +237,18 @@ function addLayers() {
     },
   }, firstSymbol);
 
-  map.addSource("ochex", { type: "geojson", data: EMPTY });
-  map.addLayer({ id: "oc-hex", type: "fill", source: "ochex", maxzoom: ZOOM_PONTOS, paint: { "fill-color": HEX_RAMP[0], "fill-opacity": 0.8 } }, firstSymbol);
-  map.addLayer({ id: "oc-hex-line", type: "line", source: "ochex", maxzoom: ZOOM_PONTOS, paint: { "line-color": "#FFFFFF", "line-width": 0.8 } }, firstSymbol);
+  map.addSource("oc", { type: "geojson", data: EMPTY });
+  // Densidade de núcleo (kernel) sobre as ocorrências filtradas: cada registro espalha peso num raio que cresce com o zoom.
+  map.addLayer({
+    id: "oc-heat", type: "heatmap", source: "oc", maxzoom: ZOOM_PONTOS + 1.5,
+    paint: {
+      "heatmap-weight": 1,
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 9, 0.25, 12, 0.6, 15, 1.2],
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 7, 12, 14, 15, 24],
+      "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], ...DENSIDADE_CORES.flat()],
+      "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 12.5, 0.9, ZOOM_PONTOS + 1.5, 0.25],
+    },
+  }, firstSymbol);
 
   map.addSource("chuva", { type: "geojson", data: EMPTY });
   map.addLayer({
@@ -247,7 +266,14 @@ function addLayers() {
   map.addLayer({ id: "nivel-icon", type: "symbol", source: "nivel", layout: { "icon-image": ["case", ["==", ["get", "sem"], 1], "diamond-off", "diamond"], "icon-allow-overlap": true, "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.8, 14, 1.1] } });
   map.addLayer({ id: "nivel-label", type: "symbol", source: "nivel", minzoom: 11.5, layout: { "text-field": ["get", "rotulo"], "text-font": FONT, "text-size": 11, "text-offset": [0, 1.3], "text-anchor": "top" }, paint: { "text-color": "#0B5F50", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
 
-  map.addSource("oc", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "oc-dot", type: "circle", source: "oc", maxzoom: ZOOM_PONTOS,
+    paint: {
+      "circle-color": ["match", ["get", "tipo"], ...Object.entries(TYPE_COLORS).flat(), "#64748B"],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.2, 13, 4],
+      "circle-stroke-color": "#FFFFFF", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 9, 0.4, 13, 1],
+    },
+  });
   map.addLayer({
     id: "oc-icon", type: "symbol", source: "oc", minzoom: ZOOM_PONTOS,
     layout: { "icon-image": ["concat", "oc-", ["get", "ic"]], "icon-allow-overlap": true, "icon-size": ["interpolate", ["linear"], ["zoom"], ZOOM_PONTOS, 0.75, 17, 1] },
@@ -256,34 +282,22 @@ function addLayers() {
   map.addSource("sel", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: { "circle-radius": 13, "circle-color": "rgba(21,94,239,0.12)", "circle-stroke-color": "#155EEF", "circle-stroke-width": 2.5 } });
 
-  for (const id of ["oc-icon", "oc-hex", "chuva-circle", "nivel-icon", "vias-line", "agua-cursos-line", "agua-corpos-fill", "susc-fill", "setores-fill", "limites-fill"]) {
+  for (const id of ["oc-icon", "oc-dot", "chuva-circle", "nivel-icon", "vias-line", "agua-cursos-line", "agua-corpos-fill", "susc-fill", "setores-fill", "limites-fill"]) {
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
   }
-  const dica = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8, className: "hexdica" });
-  map.on("mousemove", "oc-hex", (e) => {
-    const c = view.hexCells.get(e.features[0].properties.id);
-    if (!c) return;
-    const [tipo, n] = Object.entries(c.tipos).sort((a, b) => b[1] - a[1])[0];
-    dica.setLngLat(e.lngLat).setHTML(`<strong>${fmtInt(c.n)} ocorrência${c.n > 1 ? "s" : ""}</strong><br>Mais comum: ${esc(tipo)} (${fmtInt(n)})`).addTo(map);
-  });
-  map.on("mouseleave", "oc-hex", () => dica.remove());
-  map.on("zoomend", () => {
-    if (raioPorZoom(map.getZoom()) !== view.hexRaio) atualizarHex();
-    renderLegend();
-  });
+  map.on("zoomend", renderLegend);
 
-  // Prioridade de clique: ocorrência > estação > sensor > hexágono > via > suscetibilidade > setor > subprefeitura
+  // Prioridade de clique: ocorrência > estação > sensor > via > suscetibilidade > setor > subprefeitura
   map.on("click", (e) => {
-    const order = ["oc-icon", "chuva-circle", "nivel-icon", "oc-hex", "agua-cursos-line", "vias-line", "agua-corpos-fill", "susc-fill", "setores-fill", "limites-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
+    const order = ["oc-icon", "oc-dot", "chuva-circle", "nivel-icon", "agua-cursos-line", "vias-line", "agua-corpos-fill", "susc-fill", "setores-fill", "limites-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
     const hits = map.queryRenderedFeatures(e.point, { layers: order });
     if (!hits.length) return;
     hits.sort((a, b) => order.indexOf(a.layer.id) - order.indexOf(b.layer.id));
     const h = hits[0];
-    if (h.layer.id === "oc-icon") showOccurrence(h.properties.key);
+    if (h.layer.id === "oc-icon" || h.layer.id === "oc-dot") showOccurrence(h.properties.key);
     else if (h.layer.id === "chuva-circle") showStation(h.properties.id);
     else if (h.layer.id === "nivel-icon") showLevel(h.properties.id);
-    else if (h.layer.id === "oc-hex") showHex(h.properties.id);
     else if (h.layer.id === "susc-fill") showSusc(h.properties.id, e.lngLat);
     else if (h.layer.id === "vias-line") showVia(h.properties.i, e.lngLat);
     else if (h.layer.id === "setores-fill") showSetor(h.properties.i, e.lngLat);
@@ -325,10 +339,10 @@ function refreshData() {
   const vis = (ids, on) => ids.forEach((id) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none"));
 
   const occ = currentOcc();
-  map.getSource("oc").setData({ type: "FeatureCollection", features: occ.map((o) => ({ type: "Feature", geometry: { type: "Point", coordinates: [o.lon, o.lat] }, properties: { key: o.key, ic: TIPO_ICONE[o.tipo] } })) });
-  atualizarHex(occ);
+  map.getSource("oc").setData({ type: "FeatureCollection", features: occ.map((o) => ({ type: "Feature", geometry: { type: "Point", coordinates: [o.lon, o.lat] }, properties: { key: o.key, tipo: o.tipo, ic: TIPO_ICONE[o.tipo] } })) });
   const comCoropleta = view.coropletico && view.layers.limites && ctx.limites.status === "ok";
-  vis(["oc-hex", "oc-hex-line"], view.layers.ocorrencias && !comCoropleta);
+  vis(["oc-heat"], view.layers.ocorrencias && view.ocModo === "densidade" && !comCoropleta);
+  vis(["oc-dot"], view.layers.ocorrencias && view.ocModo === "pontos");
   vis(["oc-icon"], view.layers.ocorrencias);
 
   if (ctx.limites.status === "ok") {
@@ -338,7 +352,7 @@ function refreshData() {
       map.getSource("limites")._loadedOnce = true;
     }
     view.subContagem = porSub;
-    view.subBreaks = quebras(ctx.limites.data.subprefeituras.map((sp) => porSub.get(sp.sigla) || 0).filter((n) => n > 0), HEX_RAMP.length);
+    view.subBreaks = quebras(ctx.limites.data.subprefeituras.map((sp) => porSub.get(sp.sigla) || 0).filter((n) => n > 0), SUB_RAMP.length);
     const cor = ["match", ["get", "sigla"], ...ctx.limites.data.subprefeituras.flatMap((sp) => [sp.sigla, corDaContagem(porSub.get(sp.sigla) || 0)]), "#FFFFFF"];
     map.setPaintProperty("limites-fill", "fill-color", comCoropleta ? cor : "#FFFFFF");
     map.setPaintProperty("limites-fill", "fill-opacity", comCoropleta ? 0.72 : 0);
@@ -398,29 +412,24 @@ function refreshData() {
       if (bb) map.fitBounds(bb, { padding: 60, maxZoom: 14, duration: 600 });
     } else if (prev) map.easeTo({ center: CONFIG.MAP_CENTER, zoom: CONFIG.MAP_ZOOM, duration: 600 });
   }
-  renderScope(occ, vals);
   renderLayersPanel();
   renderLegend();
 }
 
 function corDaContagem(n) {
   if (!n) return "#F8FAFC";
-  return HEX_RAMP[Math.min(HEX_RAMP.length - 1, view.subBreaks.filter((b) => n >= b).length)];
+  return SUB_RAMP[Math.min(SUB_RAMP.length - 1, view.subBreaks.filter((b) => n >= b).length)];
 }
 
-function atualizarHex(occ = currentOcc()) {
-  if (!map) return;
-  view.hexRaio = raioPorZoom(map.getZoom());
-  const cells = hexbin(occ, view.hexRaio);
-  view.hexCells = new Map(cells.map((c) => [c.id, c]));
-  view.hexBreaks = quebras(cells.map((c) => c.n), HEX_RAMP.length);
-  map.getSource("ochex").setData({
-    type: "FeatureCollection",
-    features: cells.map((c) => ({ type: "Feature", geometry: { type: "Polygon", coordinates: [c.anel] }, properties: { id: c.id, n: c.n } })),
-  });
-  map.setPaintProperty("oc-hex", "fill-color", view.hexBreaks.length
-    ? ["step", ["get", "n"], HEX_RAMP[0], ...view.hexBreaks.flatMap((b, i) => [b, HEX_RAMP[i + 1]])]
-    : HEX_RAMP[HEX_RAMP.length - 1]);
+// Quebras por quantis (até `classes` faixas, sem repetir limites).
+function quebras(valores, classes) {
+  const v = [...valores].sort((a, b) => a - b);
+  const out = [];
+  for (let i = 1; i < classes && v.length; i++) {
+    const q = v[Math.min(v.length - 1, Math.floor((i / classes) * v.length))];
+    if (q > (out.at(-1) ?? 1)) out.push(q);
+  }
+  return out;
 }
 
 const publicado = (id) => Boolean(getManifest()?.datasets.some((d) => d.id === id));
@@ -450,31 +459,6 @@ async function carregarSobDemanda(id) {
   refreshData();
 }
 
-function renderScope(occ, vals) {
-  const f = store.filters;
-  const per = resolvePeriod();
-  const kpi = (rotulo, valor, sub = "") => `<div class="kpistrip__item"><span>${rotulo}</span><b>${valor}</b>${sub ? `<small>${sub}</small>` : ""}</div>`;
-  const itens = [];
-  if (ctx.occ.status === "ok" && view.layers.ocorrencias) {
-    itens.push(kpi("Ocorrências", fmtInt(occ.length), esc(per.rotulo.toLowerCase())));
-    const tipos = [...groupCount(occ.map((o) => o.tipo))].sort((a, b) => b[1] - a[1]);
-    if (tipos.length) itens.push(kpi("Mais frequente", `${icon(TIPO_ICONE[tipos[0][0]])}${esc(tipos[0][0])}`, `${fmtInt(Math.round((tipos[0][1] / occ.length) * 100))}% do recorte`));
-    const sps = [...groupCount(occ.map((o) => o.subprefeitura).filter(Boolean))].sort((a, b) => b[1] - a[1]);
-    if (sps.length && !f.subprefeitura) itens.push(kpi("Mais registros", esc(subprefNome(sps[0][0])), `${fmtInt(sps[0][1])} ocorrências`));
-  }
-  if (ctx.st.horaria?.status === "ok" && view.layers.chuva) {
-    const validas = vals.filter(({ s, r }) => r.mm !== null && !REDES_EM_REVISAO[s.rede]);
-    const media = validas.length ? validas.reduce((a, { r }) => a + r.mm, 0) / validas.length : null;
-    const janela = view.rainWindow === "periodo" ? "no período" : `em ${WINDOWS.find((w) => w[0] === view.rainWindow)[1]}`;
-    itens.push(kpi(`Chuva média ${janela}`, media === null ? "sem leitura" : `${fmt1(media)} mm`,
-      `${fmtInt(validas.length)} estações${Object.keys(REDES_EM_REVISAO).length ? `, sem ${Object.keys(REDES_EM_REVISAO).join(", ")} (em revisão)` : ""}`));
-  }
-  $("#m-scope").innerHTML = `<div class="kpistrip">
-    <div class="kpistrip__lugar">${icon("pin")}<strong>${esc(f.subprefeitura ? subprefNome(f.subprefeitura) : "Município de São Paulo")}</strong><span>${esc(per.texto)}</span></div>
-    ${itens.join("")}
-  </div>`;
-}
-
 /* ------------------------------------------------------------------ legenda fixa */
 function renderLegend() {
   const host = $("#m-legend");
@@ -485,7 +469,7 @@ function renderLegend() {
   const comCoropleta = view.coropletico && view.layers.limites && ctx.limites.status === "ok";
   if (comCoropleta) {
     const br = view.subBreaks;
-    const faixas = HEX_RAMP.slice(0, br.length + 1).map((c, i) => {
+    const faixas = SUB_RAMP.slice(0, br.length + 1).map((c, i) => {
       const de = i === 0 ? 1 : br[i - 1], ate = i < br.length ? br[i] - 1 : null;
       return `<span class="legend__faixa"><i style="background:${c}"></i>${ate === null ? `${fmtInt(de)}+` : de === ate ? fmtInt(de) : `${fmtInt(de)}–${fmtInt(ate)}`}</span>`;
     }).join("");
@@ -494,14 +478,11 @@ function renderLegend() {
     blocos.push(`<div class="legend__bloco"><strong>Subprefeituras</strong><div class="legend__row"><span class="legend__line" style="height:2px;background:#475569"></span>limite <span class="legend__line" style="height:3px;background:#155EEF"></span>selecionada</div></div>`);
   if (view.layers.ocorrencias && ctx.occ.status === "ok") {
     const tipos = Object.entries(TIPO_ICONE).map(([t, g]) => `<span class="legend__tipo"><span class="legend__icone" style="background:${TYPE_COLORS[t]}">${icon(g)}</span>${esc(t)}</span>`).join("");
-    if (zoom < ZOOM_PONTOS && !comCoropleta) {
-      const br = view.hexBreaks;
-      const faixas = HEX_RAMP.slice(0, br.length + 1).map((c, i) => {
-        const de = i === 0 ? 1 : br[i - 1], ate = i < br.length ? br[i] - 1 : null;
-        return `<span class="legend__faixa"><i style="background:${c}"></i>${ate === null ? `${fmtInt(de)}+` : de === ate ? fmtInt(de) : `${fmtInt(de)}–${fmtInt(ate)}`}</span>`;
-      }).join("");
-      blocos.push(`<div class="legend__bloco"><strong>Ocorrências por hexágono (${fmtInt(view.hexRaio * 2)} m)</strong><div class="legend__faixas">${faixas}</div><small>Aproxime para ver cada ocorrência pelo tipo:</small><div class="legend__tipos">${tipos}</div></div>`);
-    } else blocos.push(`<div class="legend__bloco"><strong>Ocorrências por tipo</strong><div class="legend__tipos">${tipos}</div></div>`);
+    if (zoom >= ZOOM_PONTOS) blocos.push(`<div class="legend__bloco"><strong>Ocorrências por tipo</strong><div class="legend__tipos">${tipos}</div></div>`);
+    else if (view.ocModo === "pontos")
+      blocos.push(`<div class="legend__bloco"><strong>Ocorrências</strong><div class="legend__tipos">${Object.keys(TIPO_ICONE).map((t) => `<span class="legend__tipo"><span class="legend__ponto" style="background:${TYPE_COLORS[t]}"></span>${esc(t)}</span>`).join("")}</div></div>`);
+    else if (!comCoropleta)
+      blocos.push(`<div class="legend__bloco"><strong>Concentração de ocorrências</strong><div class="legend__gradiente" style="background:linear-gradient(90deg,${DENSIDADE_CORES.slice(1).map(([, c]) => c).join(",")})"></div><div class="legend__scale"><span>menor</span><span>maior</span></div><small>Registros históricos, não risco. Aproxime para ver cada ocorrência pelo tipo.</small></div>`);
   }
   if (view.layers.chuva && ctx.st.est.status === "ok") {
     const br = view.rainBreaks || [1, 5, 10, 20, 40, 60, 80];
@@ -522,117 +503,105 @@ function renderLegend() {
 
 /* ------------------------------------------------------------------ painel lateral */
 function renderFilters() {
-  $("#m-filters").innerHTML = filterBar({ id: "mfb" });
+  $("#m-filters").innerHTML = filterBar({ id: "mfb", compacto: true });
   bindFilterBar($("#m-filters"), "mfb");
 }
 
-const WINDOWS = [["1h", "1 h"], ["24h", "24 h"], ["72h", "72 h"], ["periodo", "Período do filtro"]];
+const WINDOWS = [["1h", "1 h"], ["24h", "24 h"], ["72h", "72 h"], ["periodo", "Período"]];
 
-function layerRow(id, title, hint, legend, { disabled = false, reason = "" } = {}) {
-  const on = !disabled && view.layers[id];
-  return `<div class="layer ${disabled ? "is-disabled" : ""}">
-    <label class="check"><input type="checkbox" data-layer="${id}" ${on ? "checked" : ""} ${disabled ? "disabled" : ""} aria-describedby="lh-${id}">
-      <span class="check__text"><span>${esc(title)}</span><span class="check__hint" id="lh-${id}">${disabled ? `${icon("info")} ${esc(reason)}` : hint}</span></span></label>
-    ${on && legend ? `<div class="layer__legend">${legend}</div>` : ""}
+function layerRow(id, title, fonte, extra = "") {
+  const on = view.layers[id];
+  return `<div class="layer">
+    <label class="check"><input type="checkbox" data-layer="${id}" ${on ? "checked" : ""}>
+      <span class="check__text"><span>${esc(title)}</span><span class="check__hint">${fonte}</span></span></label>
+    ${on && extra ? `<div class="layer__legend">${extra}</div>` : ""}
   </div>`;
 }
 
+const seg = (nome, atributo, opcoes, atual) =>
+  `<div class="seg" role="group" aria-label="${esc(nome)}">${opcoes.map(([k, t]) => `<button type="button" data-${atributo}="${k}" aria-pressed="${atual === k}">${t}</button>`).join("")}</div>`;
+
+// Só entram no menu as camadas publicadas; o que ainda não foi exportado não aparece.
 function renderLayersPanel() {
   const host = $("#m-layers");
   if (!host) return;
   const per = resolvePeriod();
-  const occMeta = ctx.occ.meta, susc = ctx.susc;
-  const winLabel = view.rainWindow === "periodo" ? `${per.texto}` : `últimas ${WINDOWS.find((w) => w[0] === view.rainWindow)[1]} até ${fmtDateTime(ctx.st.horaria?.meta?.referencia)}`;
-  const m = getManifest();
-  const naoPub = Object.fromEntries((m.nao_publicados || []).map((n) => [n.id, n.motivo]));
+  const ref = ctx.st.horaria?.meta?.referencia;
+  const linhas = [];
+  if (ctx.occ.status === "ok")
+    linhas.push(layerRow("ocorrencias", "Ocorrências", "GeoSampa", seg("Forma de exibição", "modo", [["densidade", "Densidade"], ["pontos", "Pontos"]], view.ocModo)));
+  if (ctx.st.est.status === "ok")
+    linhas.push(layerRow("chuva", "Chuva", "CEMADEN, SIBH e INMET · mm",
+      `${seg("Janela da chuva acumulada", "win", WINDOWS, view.rainWindow)}
+      <div class="note" style="margin-top:6px">${view.rainWindow === "periodo" ? esc(per.texto) : `Até ${esc(fmtDateTime(ref))}`} ${ctx.st.horaria?.meta ? freshnessBadge(ctx.st.horaria.meta, "chuva_horaria") : ""}</div>`));
+  if (ctx.nivel.status === "ok") linhas.push(layerRow("nivel", "Nível dos rios", "SIBH"));
+  if (ctx.susc.status === "ok") linhas.push(layerRow("suscetibilidade", "Suscetibilidade a inundação", "SGB/CPRM, 2015"));
+  if (ctx.limites.status === "ok")
+    linhas.push(layerRow("limites", "Subprefeituras", "GeoSampa",
+      `<label class="check"><input type="checkbox" data-coropletico ${view.coropletico ? "checked" : ""}><span class="check__text"><span>Colorir pelo número de ocorrências</span></span></label>`));
+  if (publicado("hidrografia")) linhas.push(layerRow("hidrografia", "Rios, córregos e represas", "OpenStreetMap", legendaGeo("hidrografia")));
+  if (publicado("setores")) linhas.push(layerRow("setores", "Densidade populacional", "IBGE, Censo 2022", legendaGeo("setores")));
+  if (publicado("vias")) linhas.push(layerRow("vias", "Vias principais", "OpenStreetMap", legendaGeo("vias")));
+  host.innerHTML = linhas.join("");
+  const ativas = Object.entries(view.layers).filter(([k, on]) => on && host.querySelector(`[data-layer="${k}"]`)).length;
+  $("#m-camadas-n").textContent = ativas ? `(${ativas})` : "";
 
-  host.innerHTML = [
-    layerRow("ocorrencias", "Ocorrências históricas", `${ctx.occ.status === "ok" ? "GeoSampa · hexágonos no zoom afastado, ícones por tipo no zoom próximo" : "Indisponível"}`,
-      `<div class="note">${natureBadge(occMeta)} ${occMeta ? freshnessBadge(occMeta, "ocorrencias") : ""}</div>
-      <div class="note">Período: ${esc(per.texto)}${occMeta && per.fim > occMeta.periodo.fim ? ` · publicados até ${esc(fmtDay(occMeta.periodo.fim))}` : ""}</div>`),
-    layerRow("chuva", "Chuva observada", "Pluviômetros CEMADEN, SIBH e INMET · mm",
-      `<div class="seg" role="group" aria-label="Janela da chuva acumulada">${WINDOWS.map(([k, t]) => `<button type="button" data-win="${k}" aria-pressed="${view.rainWindow === k}">${t}</button>`).join("")}</div>
-      <div class="note" style="margin-top:8px">${esc(winLabel)}. ${ctx.st.horaria?.meta ? freshnessBadge(ctx.st.horaria.meta, "chuva_horaria") : ""}</div>`,
-      { disabled: ctx.st.est.status !== "ok", reason: "Dados de chuva não publicados nesta versão." }),
-    layerRow("nivel", "Nível de rios e córregos", "Sensores fluviométricos do SIBH · cota em m",
-      `<div class="note">${esc(ctx.nivel.meta?.limiares || "")}</div>`, { disabled: ctx.nivel.status !== "ok", reason: "Nível não publicado nesta versão." }),
-    layerRow("suscetibilidade", "Suscetibilidade a inundação", "SGB/CPRM, carta de 2015 · não é previsão",
-      `<div class="note">Predisposição do terreno a inundar, sem considerar a chuva. ${susc.meta ? natureBadge(susc.meta) : ""}</div>`,
-      { disabled: susc.status !== "ok", reason: "Suscetibilidade não publicada nesta versão." }),
-    layerRow("limites", "Subprefeituras", "Limites do GeoSampa · clique para ver o resumo",
-      `<label class="check"><input type="checkbox" data-coropletico ${view.coropletico ? "checked" : ""}><span class="check__text"><span>Colorir pelo número de ocorrências</span><span class="check__hint">Substitui os hexágonos enquanto estiver ligado.</span></span></label>`,
-      { disabled: ctx.limites.status !== "ok", reason: naoPub.limites || "Limites não publicados nesta versão." }),
-    layerRow("hidrografia", "Rios, córregos e represas", "OpenStreetMap · cursos e corpos d'água", legendaGeo("hidrografia"),
-      { disabled: !publicado("hidrografia"), reason: naoPub.hidrografia || "Hidrografia não publicada nesta versão." }),
-    layerRow("setores", "Densidade populacional (IBGE)", "Setores censitários do Censo 2022 · hab/km²", legendaGeo("setores"),
-      { disabled: !publicado("setores"), reason: naoPub.setores || "Não publicado." }),
-    layerRow("vias", "Vias principais (OpenStreetMap)", "Expressas, arteriais, coletoras e acessos", legendaGeo("vias"),
-      { disabled: !publicado("vias"), reason: naoPub.vias || "Não publicado." }),
-  ].join("");
-
-  host.querySelectorAll("[data-layer]").forEach((cb) =>
-    cb.addEventListener("change", () => {
-      view.layers[cb.dataset.layer] = cb.checked;
-      refreshData();
-      renderLayersPanel();
-      host.querySelector(`[data-layer="${cb.dataset.layer}"]`)?.focus();
-    }),
-  );
+  const manter = (sel) => host.querySelector(sel)?.focus();
+  host.querySelectorAll("[data-layer]").forEach((cb) => cb.addEventListener("change", () => {
+    view.layers[cb.dataset.layer] = cb.checked;
+    refreshData();
+    manter(`[data-layer="${cb.dataset.layer}"]`);
+  }));
   host.querySelector("[data-coropletico]")?.addEventListener("change", (e) => {
     view.coropletico = e.target.checked;
     refreshData();
-    host.querySelector("[data-coropletico]")?.focus();
+    manter("[data-coropletico]");
   });
-  host.querySelectorAll("[data-win]").forEach((b) =>
-    b.addEventListener("click", () => {
-      view.rainWindow = b.dataset.win;
-      refreshData();
-      host.querySelector(`[data-win="${b.dataset.win}"]`)?.focus();
-    }),
-  );
+  host.querySelectorAll("[data-win]").forEach((b) => b.addEventListener("click", () => {
+    view.rainWindow = b.dataset.win;
+    refreshData();
+    manter(`[data-win="${b.dataset.win}"]`);
+  }));
+  host.querySelectorAll("[data-modo]").forEach((b) => b.addEventListener("click", () => {
+    view.ocModo = b.dataset.modo;
+    refreshData();
+    manter(`[data-modo="${b.dataset.modo}"]`);
+  }));
 }
 
 function legendaGeo(id) {
   const r = ctx[id];
-  const nome = { setores: "Setores censitários", vias: "Vias", hidrografia: "Hidrografia" }[id];
-  if (!r || r.status === "carregando") return stateBlock("loading", `Baixando: ${nome.toLowerCase()}…`);
-  if (r.status !== "ok") return resultState(r, nome);
-  if (id === "hidrografia") return `<div class="note">${esc(r.meta.observacao || "")} Dados © colaboradores do OpenStreetMap, ODbL.</div>`;
-  if (id === "setores") return `<div class="note">Dado agregado por setor: não identifica pessoas. ${natureBadge(r.meta)}</div>`;
-  return `<div class="note">${esc(r.meta.observacao || "")} Dados © colaboradores do OpenStreetMap, ODbL.</div>`;
+  if (!r || r.status === "carregando") return `<div class="note">Carregando…</div>`;
+  if (r.status !== "ok") return resultState(r, { setores: "Densidade populacional", vias: "Vias", hidrografia: "Hidrografia" }[id]);
+  return "";
 }
 
-function renderSideContent() {
+/* ------------------------------------------------------------------ insights em cards sobre o mapa */
+let insightsAbertos = null;
+
+function renderInsights() {
+  const host = $("#m-insights");
+  if (!host || ctx.occ.status !== "ok") return;
   const f = store.filters;
   const per = resolvePeriod();
   const occ = currentOcc();
-  const insEl = $("#m-insights");
-  if (ctx.occ.status !== "ok") insEl.innerHTML = resultState(ctx.occ, "Ocorrências");
-  else {
-    const occHist = filterOccurrences(ctx.occ.rows, { ...f, periodo: "todo" });
-    const ins = computeInsights({ occ, occHist, per, f, susc: ctx.susc, stations: currentStations(), diaria: ctx.st.diaria, occMeta: ctx.occ.meta });
-    insEl.innerHTML = ins.length ? ins.map((i) => insightCard(i, { compact: true })).join("") : stateBlock("empty", "Poucos registros no recorte", "São necessários ao menos 10 registros para descrever padrões. Amplie o período ou o território.");
-    insEl.querySelectorAll("[data-acao]").forEach((b) => b.addEventListener("click", () => runAction(ins.find((i) => i.id === b.dataset.acao).acao)));
-  }
-
-  const list = $("#m-list");
-  if (ctx.occ.status !== "ok") {
-    list.innerHTML = "";
-    return;
-  }
-  const recent = [...occ].sort((a, b) => (a.data < b.data ? 1 : -1)).slice(0, 12);
-  list.innerHTML = recent.length
-    ? `<p class="note">${fmtInt(occ.length)} ocorrências no recorte. As 12 mais recentes:</p>
-      <ul class="reclist">${recent.map((o) => `<li><button type="button" data-oc="${esc(o.key)}"><span class="legend__icone legend__icone--sm" style="background:${TYPE_COLORS[o.tipo]}">${icon(TIPO_ICONE[o.tipo])}</span><span><strong>${esc(o.tipo)}</strong> · ${esc(fmtDay(o.data))}<small>${esc(subprefNome(o.subprefeitura))}</small></span></button></li>`).join("")}</ul>
-      <button type="button" class="btn btn--neutral btn--sm" id="m-export">${icon("download")}Exportar recorte (CSV)</button>
-      <p class="note">${isDemo() ? "O arquivo exportado contém dados sintéticos e é marcado como demonstração." : "Exportação sujeita às licenças das fontes."}</p>`
-    : stateBlock("empty", "Nenhuma ocorrência no recorte", "Amplie o período ou remova filtros.");
-  list.querySelectorAll("[data-oc]").forEach((b) => b.addEventListener("click", () => {
-    const o = ctx.occ.rows.find((x) => x.key === b.dataset.oc);
-    map?.flyTo({ center: [o.lon, o.lat], zoom: 16 });
-    showOccurrence(o.key);
-  }));
-  $("#m-export")?.addEventListener("click", () => exportCsv(occ));
+  const ins = computeInsights({ occ, occHist: filterOccurrences(ctx.occ.rows, { ...f, periodo: "todo" }), per, f, susc: ctx.susc,
+    stations: currentStations(), diaria: ctx.st.diaria, occMeta: ctx.occ.meta });
+  if (insightsAbertos === null) insightsAbertos = window.innerWidth > 700;
+  if (!ins.length) { host.innerHTML = ""; return; }
+  host.innerHTML = `<details class="mapinsights" ${insightsAbertos ? "open" : ""}>
+    <summary>${icon("sparkle")}Insights <span class="mapinsights__n">${ins.length}</span></summary>
+    <div class="mapinsights__lista">${ins.map((i) => `<article class="mapinsight">
+      <strong>${esc(i.titulo)}</strong>
+      <p>${i.descricao}</p>
+      <details class="mapinsight__criterios"><summary>Critérios, fontes e limitações</summary>
+        <dl><dt>Recorte</dt><dd>${esc(i.area)} · ${esc(i.periodo)}</dd><dt>Método</dt><dd>${esc(i.metodo)}</dd><dt>Fontes</dt><dd>${esc(i.fontes)}</dd><dt>Limitações</dt><dd>${esc(i.limitacoes)}</dd></dl>
+      </details>
+      ${i.acao ? `<button type="button" class="btn btn--ghost btn--sm" data-acao="${esc(i.id)}">${icon("crosshair")}Ver no mapa</button>` : ""}
+    </article>`).join("")}</div>
+  </details>`;
+  host.querySelector("details.mapinsights").addEventListener("toggle", (e) => (insightsAbertos = e.target.open));
+  host.querySelectorAll("[data-acao]").forEach((b) => b.addEventListener("click", () => runAction(ins.find((i) => i.id === b.dataset.acao).acao)));
 }
 
 function exportCsv(occ) {
@@ -706,18 +675,6 @@ function showOccurrence(key) {
     </dl>
     <hr class="divider">${provenance(ctx.occ.meta)}
     <p class="note" style="margin-top:12px">Registro histórico: descreve algo que aconteceu, não a condição atual da via.</p>`, [o.lon, o.lat]);
-}
-
-function showHex(id) {
-  const c = view.hexCells.get(id);
-  if (!c) return;
-  const tipos = Object.entries(c.tipos).sort((a, b) => b[1] - a[1]);
-  openDetail(`${fmtInt(c.n)} ocorrência${c.n > 1 ? "s" : ""} nesta área`, `
-    <p>Hexágono de ${fmtInt(view.hexRaio * 2)} m de largura, no recorte de ${esc(resolvePeriod().texto)}. Aproxime para ver cada ocorrência.</p>
-    <ul class="mini-bars">${tipos.map(([t, n]) => `<li><span class="mini-bars__tipo"><span class="legend__icone legend__icone--sm" style="background:${TYPE_COLORS[t]}">${icon(TIPO_ICONE[t])}</span>${esc(t)}</span><span class="mini-bars__bar"><i style="width:${(n / c.n) * 100}%;background:${TYPE_COLORS[t]}"></i></span><b>${fmtInt(n)}</b></li>`).join("")}</ul>
-    <button type="button" class="btn btn--primary btn--sm" id="zoom-hex">${icon("crosshair")}Aproximar esta área</button>
-    <hr class="divider">${provenance(ctx.occ.meta, { periodo: resolvePeriod().texto })}`, c.centro);
-  $("#zoom-hex").addEventListener("click", () => map.easeTo({ center: c.centro, zoom: ZOOM_PONTOS + 0.5 }));
 }
 
 function showStation(id) {
