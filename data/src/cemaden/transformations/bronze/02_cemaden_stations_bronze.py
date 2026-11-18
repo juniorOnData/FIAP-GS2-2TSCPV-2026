@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 02_cemaden_stations_bronze
 # MAGIC
+# MAGIC ## Funções de carga
+# MAGIC
+# MAGIC `list_landing_files` localiza arquivos de dados que têm manifesto. `pending_dates` compara o identificador da coleta com a Bronze e seleciona snapshots novos ou refeitos depois da última carga. Assim, `pending` evita reler snapshots inalterados.
+# MAGIC
 # MAGIC Carrega o cadastro de estações do volume `fiap_analytics.bronze.cemaden_stations` para a tabela `fiap_analytics.bronze.cemaden_stations`.
 # MAGIC
 # MAGIC Regras:

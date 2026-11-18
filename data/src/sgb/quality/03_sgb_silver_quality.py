@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_sgb_silver_quality
 # MAGIC
+# MAGIC ## Função de apoio
+# MAGIC
+# MAGIC `lista_sql` converte os nomes de classes em uma lista de literais SQL usada pelas consultas das regras de qualidade.
+# MAGIC
 # MAGIC Regras de qualidade da Silver do SGB (`fiap_analytics.silver.sgb_susceptibility_areas`). Roda depois de `03_sgb_susceptibility_areas_silver` e antes da Gold.
 # MAGIC
 # MAGIC 1. Regras `ERRO` que falham param a tarefa e o job: a Gold não é carregada com dados ruins.

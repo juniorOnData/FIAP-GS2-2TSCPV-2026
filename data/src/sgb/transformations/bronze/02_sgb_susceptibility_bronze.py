@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 02_sgb_susceptibility_bronze
 # MAGIC
+# MAGIC ## Função de leitura
+# MAGIC
+# MAGIC `ler_camadas` percorre os shapefiles selecionados no pacote, lê atributos e geometrias e registra os metadados de camada e feição necessários para rastrear a origem dos registros.
+# MAGIC
 # MAGIC Carrega na Bronze (`fiap_analytics.bronze.sgb_susceptibility_areas`) as camadas da carta de suscetibilidade do SGB gravadas no volume `fiap_analytics.bronze.sgb_susceptibility`.
 # MAGIC
 # MAGIC Regras:

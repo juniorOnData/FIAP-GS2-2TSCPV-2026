@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_sgb_susceptibility_areas_silver
 # MAGIC
+# MAGIC ## Funções auxiliares
+# MAGIC
+# MAGIC `coluna` localiza um atributo mesmo quando o nome varia entre camadas do shapefile. `numero` converte valores numéricos recebidos como texto e retorna nulo para conteúdo ausente ou inválido.
+# MAGIC
 # MAGIC Recria a Silver das áreas da carta de suscetibilidade do SGB (`fiap_analytics.silver.sgb_susceptibility_areas`) a partir da Bronze: uma linha por feição, com camada, classe padronizada e geometria padronizada.
 # MAGIC
 # MAGIC Regras:

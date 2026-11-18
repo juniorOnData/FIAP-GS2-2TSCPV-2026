@@ -251,6 +251,7 @@ Os notebooks estão no formato de código-fonte do Databricks (`.py` e `.sql` co
 
 ## Ordem de execução
 
+Para conhecer a implementação dos notebooks e as funções de cada fonte, consulte a [Documentação Técnica - Pipelines de Dados](PIPELINES_TECNICOS.md).
 
 ### CEMADEN
 

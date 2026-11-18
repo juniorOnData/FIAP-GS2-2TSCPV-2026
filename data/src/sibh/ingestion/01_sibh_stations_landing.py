@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 01_sibh_stations_landing
 # MAGIC
+# MAGIC ## Funções de ingestão
+# MAGIC
+# MAGIC `fetch_stations` faz a chamada à API com retentativas para erros transitórios e devolve os registros do cadastro. `validate` confere o formato, a presença de identificadores e de estações da capital, além de resumir duplicidades e instituições do cadastro.
+# MAGIC
 # MAGIC Baixa o cadastro de estações do SIBH (SP Águas) e grava no volume `fiap_analytics.bronze.sibh_stations`.
 # MAGIC
 # MAGIC Fonte: `https://cth.daee.sp.gov.br/sibh/api/v2/stations` (API pública, sem autenticação). A resposta traz o estado inteiro, de todas as instituições (SP Águas, SAISP, CEMADEN, ANA, SABESP, CETESB, INMET...).

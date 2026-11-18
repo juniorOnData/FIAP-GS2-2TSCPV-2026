@@ -2,6 +2,10 @@
 # MAGIC %md
 # MAGIC # 03_ibge_census_tracts_silver
 # MAGIC
+# MAGIC ## Funções de conversão
+# MAGIC
+# MAGIC `codigo` normaliza códigos textuais e marcadores de ausência; `inteiro` e `decimal` convertem contagens e medidas; `arredondado` aplica a precisão definida para os campos numéricos publicados na Silver.
+# MAGIC
 # MAGIC Recria a Silver dos setores censitários do Censo 2022 no município de São Paulo (`fiap_analytics.silver.ibge_census_tracts`) a partir da Bronze: uma linha por setor, com códigos e nomes padronizados, contagens tipadas e geometria padronizada.
 # MAGIC
 # MAGIC Regras:
