@@ -8,6 +8,13 @@
 # MAGIC 2. Regras `AVISO` só registram.
 # MAGIC 3. Resultados em `fiap_analytics.bronze.geosampa_data_quality_log`, uma linha por regra e execução.
 
+# MAGIC
+# MAGIC ## Regras avaliadas
+# MAGIC
+# MAGIC A lista `regras` verifica volume e correspondência com a Bronze, chave da ocorrência, período da data, SRID e coordenadas, além da identificação de tipo e subprefeitura. As regras classificadas como `ERRO` interrompem a tarefa quando excedem o limite; `AVISO` apenas registra a proporção encontrada.
+# MAGIC
+# MAGIC `DataQuality.executar(regras)` avalia e grava os resultados no log compartilhado. `dq.validar(resultados)` aplica a política de bloqueio das regras `ERRO`; ele é chamado depois da exibição dos resultados para que uma falha fique registrada antes de interromper o job.
+
 # COMMAND ----------
 
 import os

@@ -12,6 +12,30 @@
 # MAGIC 4. Uma versão por ano: o volume deve ter um arquivo por ano (a carga para se houver dois). Quando o arquivo de um ano é trocado por uma versão corrigida (SHA256 novo), a nova é carregada e as linhas da anterior são removidas.
 # MAGIC 5. Conferência por camada: linhas lidas precisam bater com as gravadas. Uma linha por arquivo no `geosampa_ingestion_log`.
 
+# MAGIC
+# MAGIC ## Etapas do notebook
+# MAGIC
+# MAGIC 1. Lista recursivamente arquivos `.gpkg` e `.zip` no Volume. A carga é manual: os arquivos devem ser enviados ao Volume antes da execução.
+# MAGIC 2. Agrupa os arquivos pelo ano identificado no nome. Se houver mais de um arquivo para o mesmo ano, registra `FALHA` e interrompe o processamento.
+# MAGIC 3. Calcula o SHA-256. Arquivos com hash já presente na Bronze são ignorados; arquivos alterados seguem para leitura.
+# MAGIC 4. Em arquivos ZIP, valida os caminhos internos antes de extrair os GeoPackages em uma pasta temporária.
+# MAGIC 5. Lê as camadas vetoriais, anexa os metadados de origem e grava o lote com `mergeSchema` para acomodar variações entre camadas e anos.
+# MAGIC 6. Confere as quantidades por hash e camada. Quando a carga de um ano é substituída, remove a versão anterior depois da gravação bem-sucedida.
+# MAGIC 7. Registra sucesso, ausência de linhas ou falha no log comum de ingestão.
+# MAGIC
+# MAGIC ## Funções locais
+# MAGIC
+# MAGIC - `sha256_of(path)` calcula o hash do arquivo em blocos de 1 MiB, sem carregar o arquivo inteiro na memória.
+# MAGIC - `gpkg_to_wkb(blob)` remove o cabeçalho GeoPackage e os bytes opcionais de envelope, devolvendo a geometria WKB. Geometrias nulas ou vazias retornam `None`.
+# MAGIC - `to_text(value)` preserva nulos e converte atributos da camada em texto, formato usado na Bronze.
+# MAGIC - `is_loaded(sha)` verifica se aquele conteúdo já existe na tabela Bronze.
+# MAGIC - `source_year(src)` extrai o primeiro ano no formato `20AA` do nome do arquivo; sem ano, retorna `None`.
+# MAGIC - `version_key(src)` define a chave usada para impedir duas versões ativas: o ano do arquivo ou, sem ano, o caminho.
+# MAGIC - `remove_superseded()` mantém a versão de maior `_ingested_at` para cada chave e apaga hashes anteriores. Também confirma que não restaram versões duplicadas.
+# MAGIC - `read_gpkg(local_gpkg, source_file, sha, year)` consulta o catálogo SQLite do GeoPackage, lê cada camada vetorial e devolve o nome da camada, a contagem e o DataFrame Spark com atributos e metadados.
+# MAGIC
+# MAGIC Erros de leitura, schema ou conferência são registrados no log antes de serem propagados, para que o job sinalize falha.
+
 # COMMAND ----------
 
 import glob
