@@ -21,7 +21,11 @@ const VIA_COR = "#334155";
 // Ocorrências agregadas em hexágonos: rampa sequencial de um só tom (ardósia), a mesma cor-base das ocorrências.
 const HEX_RAMP = ["#DDE3EC", "#B3BED0", "#8494AF", "#56668A", "#2B3A5C"];
 // Camadas pesadas (vários MB): só são baixadas quando o usuário liga a camada.
-const SOB_DEMANDA = { setores: "setores", vias: "vias" };
+const SOB_DEMANDA = { setores: "setores", vias: "vias", hidrografia: "hidrografia" };
+// Hidrografia: azul de linha (cursos) e preenchimento claro (corpos), distintos dos círculos de chuva pelo formato.
+const AGUA_LINHA = "#2C7BD0";
+const AGUA_AREA = "#B9D8F5";
+const LARGURA_AGUA = { Rio: 2.6, Canal: 2, Córrego: 1.3, "Dreno ou vala": 0.8 };
 const FONT = ["Montserrat SemiBold", "Open Sans Bold"];
 const EMPTY = { type: "FeatureCollection", features: [] };
 
@@ -30,7 +34,7 @@ let ctx = null; // dados carregados
 let root = null;
 let lastSubpref = null;
 const view = {
-  layers: { ocorrencias: true, chuva: true, nivel: false, suscetibilidade: false, limites: true, setores: false, vias: false },
+  layers: { ocorrencias: true, chuva: true, nivel: false, suscetibilidade: false, limites: true, hidrografia: true, setores: false, vias: false },
   coropletico: false,
   subBreaks: [],
   hexRaio: null,
@@ -76,7 +80,7 @@ export default {
     root.addEventListener("keydown", (e) => e.key === "Escape" && !$("#detail")?.hidden && closeDetail());
 
     const [occ, st, susc, nivel, limites] = await Promise.all([getOccurrences(), getStations(), load("suscetibilidade"), load("nivel"), load("limites")]);
-    ctx = { occ, st, susc, nivel, limites, setores: null, vias: null };
+    ctx = { occ, st, susc, nivel, limites, setores: null, vias: null, hidrografia: null };
     renderFilters();
     renderLayersPanel();
     renderSideContent();
@@ -194,6 +198,20 @@ function addLayers() {
   map.addLayer({ id: "susc-line-media", type: "line", source: "susc", filter: ["==", ["get", "grau"], 2], paint: { "line-color": "#7B6AE0", "line-width": 1, "line-dasharray": [3, 2] } }, firstSymbol);
   map.addLayer({ id: "susc-line-alta", type: "line", source: "susc", filter: ["==", ["get", "grau"], 3], paint: { "line-color": "#3F2FB0", "line-width": 1.6 } }, firstSymbol);
 
+  map.addSource("agua-corpos", { type: "geojson", data: EMPTY });
+  map.addLayer({ id: "agua-corpos-fill", type: "fill", source: "agua-corpos", paint: { "fill-color": AGUA_AREA, "fill-opacity": 0.9, "fill-outline-color": AGUA_LINHA } }, firstSymbol);
+  map.addSource("agua-cursos", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "agua-cursos-line", type: "line", source: "agua-cursos", layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": AGUA_LINHA, "line-opacity": 0.85,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, ["*", 0.6, ["get", "w"]], 15, ["*", 1.8, ["get", "w"]]],
+    },
+  }, firstSymbol);
+  map.addLayer({ id: "agua-label", type: "symbol", source: "agua-cursos", minzoom: 12.5, filter: ["!=", ["get", "nome"], ""],
+    layout: { "symbol-placement": "line", "text-field": ["get", "nome"], "text-font": FONT, "text-size": 11, "text-letter-spacing": 0.03 },
+    paint: { "text-color": "#1D5A9E", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+
   map.addSource("limites", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "limites-fill", type: "fill", source: "limites", paint: { "fill-color": "#FFFFFF", "fill-opacity": 0 } }, firstSymbol);
   map.addLayer({ id: "limites-line", type: "line", source: "limites", paint: { "line-color": "#475569", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.8, 14, 1.6], "line-opacity": 0.8 } }, firstSymbol);
@@ -238,7 +256,7 @@ function addLayers() {
   map.addSource("sel", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: { "circle-radius": 13, "circle-color": "rgba(21,94,239,0.12)", "circle-stroke-color": "#155EEF", "circle-stroke-width": 2.5 } });
 
-  for (const id of ["oc-icon", "oc-hex", "chuva-circle", "nivel-icon", "vias-line", "susc-fill", "setores-fill", "limites-fill"]) {
+  for (const id of ["oc-icon", "oc-hex", "chuva-circle", "nivel-icon", "vias-line", "agua-cursos-line", "agua-corpos-fill", "susc-fill", "setores-fill", "limites-fill"]) {
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
   }
@@ -257,7 +275,7 @@ function addLayers() {
 
   // Prioridade de clique: ocorrência > estação > sensor > hexágono > via > suscetibilidade > setor > subprefeitura
   map.on("click", (e) => {
-    const order = ["oc-icon", "chuva-circle", "nivel-icon", "oc-hex", "vias-line", "susc-fill", "setores-fill", "limites-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
+    const order = ["oc-icon", "chuva-circle", "nivel-icon", "oc-hex", "agua-cursos-line", "vias-line", "agua-corpos-fill", "susc-fill", "setores-fill", "limites-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
     const hits = map.queryRenderedFeatures(e.point, { layers: order });
     if (!hits.length) return;
     hits.sort((a, b) => order.indexOf(a.layer.id) - order.indexOf(b.layer.id));
@@ -270,6 +288,8 @@ function addLayers() {
     else if (h.layer.id === "vias-line") showVia(h.properties.i, e.lngLat);
     else if (h.layer.id === "setores-fill") showSetor(h.properties.i, e.lngLat);
     else if (h.layer.id === "limites-fill") showSubpref(h.properties.sigla, e.lngLat);
+    else if (h.layer.id === "agua-cursos-line") showAgua("cursos", h.properties.i, e.lngLat);
+    else if (h.layer.id === "agua-corpos-fill") showAgua("corpos", h.properties.i, e.lngLat);
   });
 }
 
@@ -364,6 +384,7 @@ function refreshData() {
   }
   vis(["setores-fill", "setores-line"], view.layers.setores && ctx.setores?.status === "ok");
   vis(["vias-line"], view.layers.vias && ctx.vias?.status === "ok");
+  vis(["agua-cursos-line", "agua-corpos-fill", "agua-label"], view.layers.hidrografia && ctx.hidrografia?.status === "ok");
 
   // recorte territorial: aproxima a subprefeitura selecionada
   const sp = store.filters.subprefeitura;
@@ -411,7 +432,14 @@ async function carregarSobDemanda(id) {
   const r = await load(SOB_DEMANDA[id]);
   ctx[id] = r;
   if (!map) return;
-  if (r.status === "ok") {
+  if (r.status === "ok" && id === "hidrografia") {
+    const { cursos, corpos } = r.data;
+    map.getSource("agua-corpos").setData({ type: "FeatureCollection", features: corpos.geometria.map((g, i) => ({ type: "Feature", geometry: { type: "MultiPolygon", coordinates: g }, properties: { i } })) });
+    map.getSource("agua-cursos").setData({
+      type: "FeatureCollection",
+      features: cursos.geometria.map((g, i) => ({ type: "Feature", geometry: { type: "MultiLineString", coordinates: g }, properties: { i, w: LARGURA_AGUA[cursos.classe[i]] || 1, nome: cursos.nome[i] || "" } })),
+    });
+  } else if (r.status === "ok") {
     const c = r.data;
     const features = id === "setores"
       ? c.geometria.map((g, i) => ({ type: "Feature", geometry: { type: "MultiPolygon", coordinates: g }, properties: { i, d: c.densidade[i] } }))
@@ -483,6 +511,8 @@ function renderLegend() {
     blocos.push(`<div class="legend__bloco"><strong>Nível de rios</strong><div class="legend__row"><span class="legend__diamond" style="background:#0F8A73"></span>com leitura <span class="legend__diamond" style="background:#94A3B8"></span>sem leitura</div></div>`);
   if (view.layers.suscetibilidade && ctx.susc.status === "ok")
     blocos.push(`<div class="legend__bloco"><strong>Suscetibilidade a inundação</strong><div class="legend__faixas">${[3, 2, 1].map((g) => `<span class="legend__faixa"><i style="background:${SUSC_COLORS[g]}"></i>${["", "Baixa", "Média", "Alta"][g]}</span>`).join("")}</div></div>`);
+  if (view.layers.hidrografia && ctx.hidrografia?.status === "ok")
+    blocos.push(`<div class="legend__bloco"><strong>Hidrografia (OpenStreetMap)</strong><div class="legend__row"><span class="legend__line" style="height:3px;background:${AGUA_LINHA}"></span>rio <span class="legend__line" style="height:1.5px;background:${AGUA_LINHA}"></span>córrego <span class="legend__sw" style="background:${AGUA_AREA};outline:1px solid ${AGUA_LINHA}"></span>represa ou lago</div><small>Córregos canalizados podem não aparecer.</small></div>`);
   if (view.layers.setores && ctx.setores?.status === "ok")
     blocos.push(`<div class="legend__bloco"><strong>Pessoas por km²</strong><div class="legend__row">${DENS_RAMP.map((c) => `<span class="legend__ramp" style="background:${c}"></span>`).join("")}</div><div class="legend__scale"><span>0</span><span>${fmtInt(DENS_BREAKS[DENS_BREAKS.length - 1])}+</span></div></div>`);
   if (view.layers.vias && ctx.vias?.status === "ok")
@@ -532,6 +562,8 @@ function renderLayersPanel() {
     layerRow("limites", "Subprefeituras", "Limites do GeoSampa · clique para ver o resumo",
       `<label class="check"><input type="checkbox" data-coropletico ${view.coropletico ? "checked" : ""}><span class="check__text"><span>Colorir pelo número de ocorrências</span><span class="check__hint">Substitui os hexágonos enquanto estiver ligado.</span></span></label>`,
       { disabled: ctx.limites.status !== "ok", reason: naoPub.limites || "Limites não publicados nesta versão." }),
+    layerRow("hidrografia", "Rios, córregos e represas", "OpenStreetMap · cursos e corpos d'água", legendaGeo("hidrografia"),
+      { disabled: !publicado("hidrografia"), reason: naoPub.hidrografia || "Hidrografia não publicada nesta versão." }),
     layerRow("setores", "Densidade populacional (IBGE)", "Setores censitários do Censo 2022 · hab/km²", legendaGeo("setores"),
       { disabled: !publicado("setores"), reason: naoPub.setores || "Não publicado." }),
     layerRow("vias", "Vias principais (OpenStreetMap)", "Expressas, arteriais, coletoras e acessos", legendaGeo("vias"),
@@ -562,8 +594,10 @@ function renderLayersPanel() {
 
 function legendaGeo(id) {
   const r = ctx[id];
-  if (!r || r.status === "carregando") return stateBlock("loading", id === "setores" ? "Baixando os setores censitários…" : "Baixando as vias…");
-  if (r.status !== "ok") return resultState(r, id === "setores" ? "Setores censitários" : "Vias");
+  const nome = { setores: "Setores censitários", vias: "Vias", hidrografia: "Hidrografia" }[id];
+  if (!r || r.status === "carregando") return stateBlock("loading", `Baixando: ${nome.toLowerCase()}…`);
+  if (r.status !== "ok") return resultState(r, nome);
+  if (id === "hidrografia") return `<div class="note">${esc(r.meta.observacao || "")} Dados © colaboradores do OpenStreetMap, ODbL.</div>`;
   if (id === "setores") return `<div class="note">Dado agregado por setor: não identifica pessoas. ${natureBadge(r.meta)}</div>`;
   return `<div class="note">${esc(r.meta.observacao || "")} Dados © colaboradores do OpenStreetMap, ODbL.</div>`;
 }
@@ -666,6 +700,7 @@ function showOccurrence(key) {
       <dt>Subprefeitura</dt><dd>${esc(subprefNome(o.subprefeitura))}</dd>
       <dt>Coordenadas</dt><dd class="mono">${o.lat.toFixed(5)}, ${o.lon.toFixed(5)} (SIRGAS 2000)</dd>
       <dt>Território</dt><dd>${esc(g)}</dd>
+      ${ctx.occ.meta?.dist_agua_max_m ? `<dt>Rede hídrica</dt><dd>${o.dist === null ? `Nenhum curso ou corpo d'água mapeado a até ${fmtInt(ctx.occ.meta.dist_agua_max_m)} m` : o.dist === 0 ? "Dentro de um corpo d'água mapeado" : `Curso ou corpo d'água mapeado a ${fmtInt(o.dist)} m (OpenStreetMap)`}</dd>` : ""}
       <dt>Identificação</dt><dd class="mono">arquivo ${o.ano_origem} · nº ${o.id}</dd>
       <dt>Tabela</dt><dd class="mono">gold.fact_geosampa_flooding_events</dd>
     </dl>
@@ -733,6 +768,19 @@ function showLevel(id) {
     </dl>
     <a class="btn btn--secondary btn--sm" href="#/monitoramento?nivel=${encodeURIComponent(id)}">${icon("activity")}Abrir série no monitoramento</a>
     <hr class="divider">${provenance(ctx.nivel.meta)}`, [s.lon, s.lat]);
+}
+
+function showAgua(tipo, i, lngLat) {
+  const c = ctx.hidrografia.data[tipo];
+  openDetail(c.nome[i] || (tipo === "cursos" ? "Curso d'água sem nome no OpenStreetMap" : "Corpo d'água sem nome no OpenStreetMap"), `
+    <div class="pill-list"><span class="legend__icone" style="background:${AGUA_LINHA}">${icon("rio")}</span>${natureBadge(ctx.hidrografia.meta)}</div>
+    <dl class="dl" style="margin-top:12px">
+      <dt>Classe</dt><dd>${esc(c.classe[i] || "—")}</dd>
+      ${tipo === "cursos" ? `<dt>Comprimento</dt><dd>${fmt2(c.km[i])} km</dd>` : `<dt>Área</dt><dd>${fmt2(c.area_km2[i])} km²</dd>`}
+      <dt>Identificador OSM</dt><dd class="mono">${esc(c.id[i])}</dd>
+    </dl>
+    <p class="note" style="margin-top:12px">${esc(ctx.hidrografia.meta.observacao || "")} Dados © colaboradores do OpenStreetMap, ODbL 1.0.</p>
+    <hr class="divider">${provenance(ctx.hidrografia.meta)}`, [lngLat.lng, lngLat.lat]);
 }
 
 function showSubpref(sigla, lngLat) {

@@ -89,6 +89,27 @@ export function computeInsights({ occ, occHist, per, f, susc, stations, diaria, 
         acao: { label: "Ligar a camada de suscetibilidade", camada: "suscetibilidade" },
       });
     }
+
+    // 3b. proximidade da rede hídrica (OSM): tipos ligados à água comparados com quedas de árvore
+    if (occMeta?.dist_agua_max_m) {
+      const perto = (lista) => lista.filter((o) => o.dist !== null && o.dist <= 100).length / lista.length;
+      const agua = occ.filter((o) => o.tipo === "Alagamento" || o.tipo === "Inundação");
+      const arvores = occ.filter((o) => o.tipo === "Queda de Árvore");
+      if (agua.length >= 20 && arvores.length >= 20) {
+        out.push({
+          id: "hidrografia",
+          titulo: "Proximidade da rede hídrica",
+          descricao: `${fmtPct(perto(agua), 0)} dos alagamentos e inundações do recorte estão a até 100 m de um curso ou corpo d'água mapeado, contra ${fmtPct(perto(arvores), 0)} das quedas de árvore.`,
+          area: recorte,
+          periodo: per.texto,
+          metodo: "Distância de cada ocorrência ao curso ou corpo d'água do OpenStreetMap mais próximo; as quedas de árvore servem de comparação, por não dependerem da água.",
+          fontes: `${fontesOc}; OpenStreetMap (hidrografia)`,
+          limitacoes: "Muitos córregos de São Paulo são canalizados ou correm sob avenidas, e o OpenStreetMap os mapeia de forma desigual. Associação espacial, não relação causal.",
+          evidencia: "Descritiva (proximidade espacial)",
+          acao: { label: "Ligar a camada de hidrografia", camada: "hidrografia" },
+        });
+      }
+    }
   }
 
   // 4. chuva × ocorrências por faixa de chuva diária

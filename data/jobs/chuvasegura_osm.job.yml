@@ -1,4 +1,5 @@
-# Job do OpenStreetMap: rede viária do município de São Paulo (extrato da Geofabrik), da landing até a Gold.
+# Job do OpenStreetMap: rede viária e hidrografia do município de São Paulo (extrato da Geofabrik), da landing até a Gold.
+# As duas cadeias (vias e água) correm em paralelo; a da água não tem Silver (poucos atributos, tipados na Gold).
 # A Geofabrik publica um extrato novo por dia; a landing só baixa de novo quando o extrato muda.
 # A qualidade da Silver barra a Gold. Dados © OpenStreetMap contributors, ODbL 1.0.
 # Sem agenda própria: roda dentro do job ChuvaSegura (chuvasegura.job.yml), depois da dim_tempo.
@@ -46,6 +47,28 @@ resources:
             - task_key: dim_osm_roads
           notebook_task:
             notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/quality/05_osm_gold_quality
+            source: WORKSPACE
+        - task_key: osm_water_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/ingestion/01_osm_water_landing
+            source: WORKSPACE
+        - task_key: osm_water_bronze
+          depends_on:
+            - task_key: osm_water_landing
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/transformations/bronze/02_osm_water_bronze
+            source: WORKSPACE
+        - task_key: dim_osm_water
+          depends_on:
+            - task_key: osm_water_bronze
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/transformations/gold/04_dim_osm_water
+            source: WORKSPACE
+        - task_key: quality_gold_osm_water
+          depends_on:
+            - task_key: dim_osm_water
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/osm/quality/05_osm_water_gold_quality
             source: WORKSPACE
       queue:
         enabled: true

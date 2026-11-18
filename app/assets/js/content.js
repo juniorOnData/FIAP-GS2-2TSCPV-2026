@@ -79,7 +79,7 @@ export const FONTES = [
   },
   {
     id: "osm", nome: "OpenStreetMap (Geofabrik)", prioridade: "P2", publicado: true,
-    uso: "Rede viária para estimar vias potencialmente afetadas.",
+    uso: "Rede viária para estimar vias potencialmente afetadas, e hidrografia (rios, córregos e represas) para relacionar as ocorrências com a proximidade da água.",
     acesso: "Extrato free shapefile da região Sudeste (Geofabrik).",
     frequencia: "Job semanal (segunda-feira).",
     cobertura: "Cerca de 292 mil vias no envelope do município.",
@@ -135,6 +135,7 @@ export const KB = [
   { id: "fuso", tipo: "glossario", titulo: "Fuso horário", texto: "Todas as datas e horas são exibidas no horário de São Paulo (UTC−03:00, sem horário de verão).", tags: "utc hora" },
 
   // camadas
+  { id: "camada-hidrografia", tipo: "camada", titulo: "Camada: rios, córregos e represas", texto: "Cursos e corpos d'água do OpenStreetMap. Rios em linha mais grossa, córregos em linha fina, represas e lagos em azul claro. Cada ocorrência mostra a distância até a água mapeada mais próxima (até 500 m). Muitos córregos de São Paulo são canalizados ou correm sob avenidas e podem não aparecer.", tags: "hidrografia rio corrego represa agua drenagem osm", link: "#/mapa?camada=hidrografia" },
   { id: "camada-ocorrencias", tipo: "camada", titulo: "Camada: ocorrências históricas", texto: "Registros do GeoSampa. Em escala ampla, o mapa conta as ocorrências em hexágonos de tamanho fixo (a cor indica a quantidade; o tamanho do hexágono diminui ao aproximar). A partir do zoom de bairro, cada ocorrência aparece com o ícone do tipo: queda de árvore, alagamento, inundação ou deslizamento. Filtros de período, tipo e subprefeitura se aplicam.", tags: "mapa hexagono agrupamento icone tipo", link: "#/mapa" },
   { id: "camada-chuva", tipo: "camada", titulo: "Camada: chuva observada", texto: "Pluviômetros coloridos pela chuva acumulada na janela escolhida (1 h, 24 h, 72 h ou período do filtro), em escala azul de mm. A escala é de chuva, não de risco. Círculo branco com borda cinza = sem leitura na janela.", tags: "mapa estacao mm", link: "#/mapa" },
   { id: "camada-nivel", tipo: "camada", titulo: "Camada: nível de rios e córregos", texto: "Sensores do SIBH em forma de losango, com o último nível horário. Losango cinza = sem leitura recente. Sem cotas oficiais, os níveis não são classificados.", tags: "mapa sensor rio", link: "#/mapa" },

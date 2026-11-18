@@ -548,6 +548,7 @@ def main() -> None:
         "nao_publicados": [
             {"id": "limites", "titulo": "Limites administrativos", "motivo": "O pacote de demonstração não inclui os limites das subprefeituras; eles vêm só da publicação real (GeoSampa)."},
             {"id": "setores", "titulo": "Setores censitários (IBGE)", "motivo": "O pacote de demonstração não inclui setores censitários; eles vêm só da publicação real (IBGE)."},
+            {"id": "hidrografia", "titulo": "Hidrografia (OpenStreetMap)", "motivo": "O pacote de demonstração não inclui a hidrografia; ela vem só da publicação real (OpenStreetMap)."},
             {"id": "vias", "titulo": "Rede viária (OpenStreetMap)", "motivo": "O pacote de demonstração não inclui a rede viária; ela vem só da publicação real (OpenStreetMap)."},
         ],
     }
