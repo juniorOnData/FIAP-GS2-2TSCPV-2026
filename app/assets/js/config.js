@@ -7,7 +7,8 @@ export const CONFIG = {
   TIMEZONE: "America/Sao_Paulo",
   TZ_LABEL: "horário de São Paulo (UTC−03:00)",
   // Idade máxima, em horas, antes de um dado ser marcado como desatualizado.
-  STALE_HOURS: { chuva_horaria: 3, chuva_diaria: 26, nivel: 3, ocorrencias: 24 * 45, default: 24 * 7 },
+  // O job publica a cada 2 horas; somando a duração da execução e o atraso das fontes, 4 h ainda é o ritmo normal.
+  STALE_HOURS: { chuva_horaria: 4, chuva_diaria: 26, nivel: 4, ocorrencias: 24 * 45, default: 24 * 7 },
   BASEMAP_STYLE: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
   MAP_CENTER: [-46.633, -23.62],
   MAP_ZOOM: 9.6,

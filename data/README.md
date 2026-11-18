@@ -22,7 +22,7 @@ A última tarefa do job `ChuvaSegura`, `src/shared/export/01_export_web.py`, exp
 
 - **Conteúdo:** ocorrências e subprefeituras (GeoSampa); estações, chuva diária e chuva horária (CEMADEN, SIBH e INMET); nível de rios (SIBH). IBGE, OSM e a suscetibilidade do SGB entram em etapas posteriores.
 - **Trava de qualidade:** cada fonte só é exportada se a qualidade Gold dela rodou **na mesma execução do job** e passou.
-- **Tudo ou nada no site:** se alguma fonte pedida falhar, nada vai ao GitHub (o site mantém a versão anterior), o que passou fica no Volume `fiap_analytics.gold.chuvasegura_web` para conferência e a tarefa termina com erro.
+- **Uma fonte com falha não derruba as outras:** o que passou vai ao GitHub, e os conjuntos da fonte que falhou continuam no site com a versão já publicada (marcados `mantido` no manifesto, que também lista as `falhas`). Se a falha veio antes do export (qualidade Gold reprovada ou que não rodou nesta execução), ela já aparece na tarefa da fonte e o `export_web` termina com sucesso; erro no código do export termina a tarefa com erro.
 - **Sem commit à toa:** o commit só acontece se os dados mudaram (compara o SHA-256 de cada conjunto com o `manifest.json` publicado). A chuva horária muda toda hora, então na prática há um commit por execução.
 - **Fontes que ainda não rodaram:** o widget `fontes` (padrão `geosampa,cemaden,sibh,inmet`) escolhe o que exportar. Antes do backfill do INMET, tire `inmet`.
 - **Segredo:** scope `github`, chave `token`, com um token do GitHub de permissão *Contents: read and write* **só neste repositório** (fine-grained). Crie com `databricks secrets create-scope github` e `databricks secrets put-secret github token`. O token nunca é gravado em arquivo ou log.
@@ -405,7 +405,7 @@ O funcionamento técnico das tarefas, das transformações geoespaciais e das re
 
 ## Jobs e workflows
 
-O pipeline roda num único job com agenda, o `ChuvaSegura` (`jobs/chuvasegura.job.yml`), todo dia às 07:00 (America/Sao_Paulo):
+O pipeline roda num único job com agenda, o `ChuvaSegura` (`jobs/chuvasegura.job.yml`), a cada 2 horas (00:00, 02:00, ..., 22:00, America/Sao_Paulo), com uma execução por vez (`max_concurrent_runs: 1` e fila):
 
 1. `dim_tempo`: a única dimensão compartilhada, criada uma vez antes de todas as fontes.
 2. As sete fontes, em paralelo, cada uma no seu job (tarefas *Run job*). Separar por fonte faz com que uma falha numa API não trave as outras.
