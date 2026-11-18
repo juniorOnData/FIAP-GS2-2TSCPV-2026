@@ -74,6 +74,7 @@ FATOR_NIVEL = FATOR_PARA_METRO[UNIDADE_NIVEL_ORIGEM]
 ENVELOPE = (-24.1, -23.3, -47.0, -46.3)  # lat mín, lat máx, lon mín, lon máx (município e entorno)
 # Simplificação das geometrias (Douglas-Peucker, em metros): abaixo de ~1 pixel no zoom em que cada camada é lida.
 TOLERANCIA_SUSC_M = 5
+TOLERANCIA_LIMITE_M = 15
 TOLERANCIA_SETOR_M = 8
 TOLERANCIA_VIA_M = 8
 HIERARQUIA_VIAS_MAX = 5  # vias expressas a coletoras e seus acessos; ruas locais, serviço e trilhas ficam de fora
@@ -258,6 +259,43 @@ def exportar_sgb():
 # COMMAND ----------
 
 
+LIMITES = f"{CATALOG}.gold.dim_geosampa_subprefecture_limits"
+INDICE_SUBPREF = None  # preenchido pelo export do GeoSampa; usado para dar subprefeitura às estações
+MOTIVO_SEM_LIMITES = None
+
+
+def exportar_limites(fonte, licenca, qualidade):
+    """limites.json (polígonos das subprefeituras) e o índice espacial para as estações, se a Gold tiver os limites."""
+    global INDICE_SUBPREF, MOTIVO_SEM_LIMITES
+    if not spark.catalog.tableExists(LIMITES):
+        MOTIVO_SEM_LIMITES = ("Os limites ainda não foram carregados: envie o shapefile das subprefeituras do GeoSampa ao Volume "
+                              "fiap_analytics.bronze.geosampa_subprefecture_limits (o download do GeoSampa exige CAPTCHA).")
+        return None
+    partes = {}
+    for r in spark.table(LIMITES).orderBy("SIG_SUBPREFEITURA", "NUM_ID_FEICAO").toLocalIterator():
+        g = geo.de_wkb(r["GEO_WKB"])
+        if not g:
+            continue
+        p = partes.setdefault(r["SIG_SUBPREFEITURA"], {"nome": r["NOM_SUBPREFEITURA"], "pols": [], "area": 0.0, "versao": r["DSC_VERSAO_FONTE"]})
+        p["pols"] += [pol for pol in geo.poligonos(g) if pol]
+        p["area"] += r["NUM_AREA_KM2"] or 0
+    if not partes:
+        raise RuntimeError(f"{LIMITES} existe, mas está vazia.")
+    INDICE_SUBPREF = IndicePoligonos([(sigla, p["pols"]) for sigla, p in partes.items()])
+    itens = []
+    for sigla, p in sorted(partes.items(), key=lambda kv: kv[1]["nome"]):
+        pts = [pt for pol in p["pols"] for pt in pol[0]]
+        itens.append({"sigla": sigla, "nome": p["nome"], "area_km2": round(p["area"], 2),
+                      "envelope": [round(min(x for x, _ in pts), 5), round(min(y for _, y in pts), 5), round(max(x for x, _ in pts), 5), round(max(y for _, y in pts), 5)],
+                      "geometria": poligonos_web(("MultiPolygon", p["pols"]), TOLERANCIA_LIMITE_M)})
+    meta = dataset_meta("limites", "Limites das subprefeituras", "oficial", fonte, licenca, [LIMITES], len(itens), qualidade,
+                        data_referencia=next(iter(partes.values()))["versao"], granularidade={"espacial": "subprefeitura", "temporal": "cadastro"},
+                        extra={"simplificacao_m": TOLERANCIA_LIMITE_M, "area_total_km2": round(sum(i["area_km2"] for i in itens), 1)})
+    corpo, entrada = pacote("limites.json", meta, {"subprefeituras": itens})
+    print(f"Limites: {len(itens)} subprefeituras ({len(corpo) / 1024:.0f} KB)")
+    return corpo, entrada
+
+
 def exportar_geosampa(indice_susc=None):
     """indice_susc: áreas de inundação do SGB (IndicePoligonos), ou None se o SGB não foi exportado."""
     fato = f"{CATALOG}.gold.fact_geosampa_flooding_events"
@@ -323,11 +361,17 @@ def exportar_geosampa(indice_susc=None):
     )
     arq_sp, ent_sp = pacote("subprefeituras.json", meta_sp, subprefeituras)
     arq_oc, ent_oc = pacote("ocorrencias.json", meta_oc, colunas)
+    arquivos_gs = {"subprefeituras.json": arq_sp, "ocorrencias.json": arq_oc}
+    datasets_gs = [ent_sp, ent_oc]
+    limites = tentar("limites", lambda: exportar_limites(fonte, licenca, qualidade))  # falha nos limites não derruba as ocorrências
+    if limites:
+        arquivos_gs["limites.json"] = limites[0]
+        datasets_gs.append(limites[1])
     print(f"GeoSampa: {len(colunas['id'])} ocorrências de {total_fato} ({descartadas} sem data ou coordenada válida); "
           f"{len(subprefeituras)} subprefeituras; qualidade {qualidade['estado']}")
     return {
-        "arquivos": {"subprefeituras.json": arq_sp, "ocorrencias.json": arq_oc},
-        "datasets": [ent_sp, ent_oc],
+        "arquivos": arquivos_gs,
+        "datasets": datasets_gs,
         "linhagem": [{"fonte": "GeoSampa", "tabelas": ["bronze.geosampa_history_flooding_events", "silver.geosampa_flooding_events", "gold.fact_geosampa_flooding_events"],
                       "publicado_na_web": True, "processado_em": AGORA, "qualidade": qualidade["estado"], "avisos": qualidade["avisos"]}],
         "referencia": f"{periodo['fim']}T23:59:00-03:00",
@@ -397,6 +441,9 @@ def cadastro_redes(redes):
                 chuva.append(base)
             else:
                 nivel.append({**base, "curso_dagua": r["NOM_ESTACAO"] or f"Sensor {r['COD_SENSOR']}", "unidade": "m"})
+    if INDICE_SUBPREF:
+        for s in chuva + nivel:
+            s["subprefeitura"] = INDICE_SUBPREF.maior_valor(s["lon"], s["lat"], padrao=None)
     return chuva, nivel
 
 
@@ -686,7 +733,7 @@ if "geosampa" in FONTES:
         datasets += r["datasets"]
         linhagem += r["linhagem"]
         referencias.append(r["referencia"])
-        publicados |= {"subprefeituras", "ocorrencias"}
+        publicados |= {d["id"] for d in r["datasets"]}
 
 redes_ok = []
 for rede in ("cemaden", "sibh", "inmet"):
@@ -718,7 +765,8 @@ if chuva_res:
         "estacoes", "Estações e sensores", "oficial", chuva_res["fonte"], chuva_res["licenca"],
         [t for t in chuva_res["tabelas"] if "fact_" not in t], len(chuva_res["chuva"]) + len(sensores), chuva_res["qualidade"],
         granularidade={"espacial": "ponto", "temporal": "cadastro"},
-        extra={"observacao": "A Gold não tem a subprefeitura das estações: o filtro por subprefeitura não as inclui."})
+        extra={"observacao": "Subprefeitura de cada estação pela localização dentro dos limites do GeoSampa (nula fora do município)." if INDICE_SUBPREF
+               else "Sem os limites das subprefeituras, as estações ficam sem subprefeitura e o filtro por subprefeitura não as inclui."})
     corpo, entrada = pacote("estacoes.json", meta_est, {"chuva": chuva_res["chuva"], "nivel": sensores})
     arquivos["estacoes.json"] = corpo
     datasets.append(entrada)
@@ -742,7 +790,7 @@ FALHAS_NO_EXPORT = [(n, m) for n, m, a_montante in falhas if not a_montante]
 
 # Conjunto de uma fonte que falhou fica com a versão já publicada: entra no manifesto novo e o arquivo não é reenviado.
 FONTES_DO_CONJUNTO = {
-    "subprefeituras": ("geosampa",), "ocorrencias": ("geosampa",),
+    "subprefeituras": ("geosampa",), "ocorrencias": ("geosampa",), "limites": ("geosampa", "limites"),
     "chuva_diaria": ("chuva", "cemaden", "sibh", "inmet"), "chuva_horaria": ("chuva", "cemaden", "sibh", "inmet"),
     "estacoes": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh", "chuva"),
     "suscetibilidade": ("sgb",), "setores": ("ibge",), "vias": ("osm",),
@@ -762,12 +810,11 @@ if not datasets:
 CATALOGO_NAO_PUBLICADO = [
     ("chuva", "Chuva observada", "chuva_diaria"), ("nivel", "Nível de rios e córregos", "nivel"),
     ("suscetibilidade", "Suscetibilidade a inundações", "suscetibilidade"), ("avisos_oficiais", "Avisos oficiais", None),
-    ("limites", "Limites administrativos", None), ("setores", "Setores censitários (IBGE)", "setores"),
+    ("limites", "Limites administrativos", "limites"), ("setores", "Setores censitários (IBGE)", "setores"),
     ("vias", "Rede viária (OpenStreetMap)", "vias"),
 ]
 MOTIVOS_FIXOS = {
     "avisos_oficiais": "Nenhuma fonte de avisos está integrada ao pipeline.",
-    "limites": "A Gold não tem a geometria das subprefeituras nem dos distritos.",
 }
 nao_publicados = []
 for id_, titulo, ds in CATALOGO_NAO_PUBLICADO:
@@ -776,10 +823,11 @@ for id_, titulo, ds in CATALOGO_NAO_PUBLICADO:
     if id_ in MOTIVOS_FIXOS:
         motivo = MOTIVOS_FIXOS[id_]
     else:
-        fontes_rel = {"chuva": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh"), "suscetibilidade": ("sgb",),
+        fontes_rel = {"chuva": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh"), "suscetibilidade": ("sgb",), "limites": ("geosampa", "limites"),
                       "setores": ("ibge",), "vias": ("osm",)}[id_]
         erros = [f"{n}: {MOTIVO_FALHA[n]}" for n in fontes_rel if n in MOTIVO_FALHA]
-        motivo = ("Falhou nesta execução (" + "; ".join(erros) + ").") if erros else "Fonte não incluída nesta publicação."
+        motivo = (("Falhou nesta execução (" + "; ".join(erros) + ").") if erros
+                  else MOTIVO_SEM_LIMITES if id_ == "limites" and MOTIVO_SEM_LIMITES else "Fonte não incluída nesta publicação.")
     nao_publicados.append({"id": id_, "titulo": titulo, "motivo": motivo})
 
 manifesto = {

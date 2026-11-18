@@ -30,7 +30,9 @@ let ctx = null; // dados carregados
 let root = null;
 let lastSubpref = null;
 const view = {
-  layers: { ocorrencias: true, chuva: true, nivel: false, suscetibilidade: false, setores: false, vias: false },
+  layers: { ocorrencias: true, chuva: true, nivel: false, suscetibilidade: false, limites: true, setores: false, vias: false },
+  coropletico: false,
+  subBreaks: [],
   hexRaio: null,
   hexBreaks: [],
   hexCells: new Map(),
@@ -73,8 +75,8 @@ export default {
     $("#detail-close").addEventListener("click", closeDetail);
     root.addEventListener("keydown", (e) => e.key === "Escape" && !$("#detail")?.hidden && closeDetail());
 
-    const [occ, st, susc, nivel] = await Promise.all([getOccurrences(), getStations(), load("suscetibilidade"), load("nivel")]);
-    ctx = { occ, st, susc, nivel, setores: null, vias: null };
+    const [occ, st, susc, nivel, limites] = await Promise.all([getOccurrences(), getStations(), load("suscetibilidade"), load("nivel"), load("limites")]);
+    ctx = { occ, st, susc, nivel, limites, setores: null, vias: null };
     renderFilters();
     renderLayersPanel();
     renderSideContent();
@@ -192,6 +194,12 @@ function addLayers() {
   map.addLayer({ id: "susc-line-media", type: "line", source: "susc", filter: ["==", ["get", "grau"], 2], paint: { "line-color": "#7B6AE0", "line-width": 1, "line-dasharray": [3, 2] } }, firstSymbol);
   map.addLayer({ id: "susc-line-alta", type: "line", source: "susc", filter: ["==", ["get", "grau"], 3], paint: { "line-color": "#3F2FB0", "line-width": 1.6 } }, firstSymbol);
 
+  map.addSource("limites", { type: "geojson", data: EMPTY });
+  map.addLayer({ id: "limites-fill", type: "fill", source: "limites", paint: { "fill-color": "#FFFFFF", "fill-opacity": 0 } }, firstSymbol);
+  map.addLayer({ id: "limites-line", type: "line", source: "limites", paint: { "line-color": "#475569", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.8, 14, 1.6], "line-opacity": 0.8 } }, firstSymbol);
+  map.addLayer({ id: "limites-sel", type: "line", source: "limites", filter: ["==", ["get", "sigla"], ""], paint: { "line-color": "#155EEF", "line-width": 3 } }, firstSymbol);
+  map.addLayer({ id: "limites-label", type: "symbol", source: "limites", minzoom: 10.3, layout: { "text-field": ["get", "nome"], "text-font": FONT, "text-size": 11, "text-transform": "uppercase", "text-letter-spacing": 0.05, "text-max-width": 8 }, paint: { "text-color": "#334155", "text-halo-color": "#fff", "text-halo-width": 1.6 } });
+
   map.addSource("vias", { type: "geojson", data: EMPTY });
   map.addLayer({
     id: "vias-line", type: "line", source: "vias", layout: { "line-cap": "round", "line-join": "round" },
@@ -230,7 +238,7 @@ function addLayers() {
   map.addSource("sel", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: { "circle-radius": 13, "circle-color": "rgba(21,94,239,0.12)", "circle-stroke-color": "#155EEF", "circle-stroke-width": 2.5 } });
 
-  for (const id of ["oc-icon", "oc-hex", "chuva-circle", "nivel-icon", "vias-line", "susc-fill", "setores-fill"]) {
+  for (const id of ["oc-icon", "oc-hex", "chuva-circle", "nivel-icon", "vias-line", "susc-fill", "setores-fill", "limites-fill"]) {
     map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
   }
@@ -247,9 +255,9 @@ function addLayers() {
     renderLegend();
   });
 
-  // Prioridade de clique: ocorrência > estação > sensor > hexágono > via > suscetibilidade > setor
+  // Prioridade de clique: ocorrência > estação > sensor > hexágono > via > suscetibilidade > setor > subprefeitura
   map.on("click", (e) => {
-    const order = ["oc-icon", "chuva-circle", "nivel-icon", "oc-hex", "vias-line", "susc-fill", "setores-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
+    const order = ["oc-icon", "chuva-circle", "nivel-icon", "oc-hex", "vias-line", "susc-fill", "setores-fill", "limites-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
     const hits = map.queryRenderedFeatures(e.point, { layers: order });
     if (!hits.length) return;
     hits.sort((a, b) => order.indexOf(a.layer.id) - order.indexOf(b.layer.id));
@@ -261,6 +269,7 @@ function addLayers() {
     else if (h.layer.id === "susc-fill") showSusc(h.properties.id, e.lngLat);
     else if (h.layer.id === "vias-line") showVia(h.properties.i, e.lngLat);
     else if (h.layer.id === "setores-fill") showSetor(h.properties.i, e.lngLat);
+    else if (h.layer.id === "limites-fill") showSubpref(h.properties.sigla, e.lngLat);
   });
 }
 
@@ -298,7 +307,24 @@ function refreshData() {
   const occ = currentOcc();
   map.getSource("oc").setData({ type: "FeatureCollection", features: occ.map((o) => ({ type: "Feature", geometry: { type: "Point", coordinates: [o.lon, o.lat] }, properties: { key: o.key, ic: TIPO_ICONE[o.tipo] } })) });
   atualizarHex(occ);
-  vis(["oc-hex", "oc-hex-line", "oc-icon"], view.layers.ocorrencias);
+  const comCoropleta = view.coropletico && view.layers.limites && ctx.limites.status === "ok";
+  vis(["oc-hex", "oc-hex-line"], view.layers.ocorrencias && !comCoropleta);
+  vis(["oc-icon"], view.layers.ocorrencias);
+
+  if (ctx.limites.status === "ok") {
+    const porSub = groupCount(occ.map((o) => o.subprefeitura).filter(Boolean));
+    if (!map.getSource("limites")._loadedOnce) {
+      map.getSource("limites").setData({ type: "FeatureCollection", features: ctx.limites.data.subprefeituras.map((sp) => ({ type: "Feature", geometry: { type: "MultiPolygon", coordinates: sp.geometria }, properties: { sigla: sp.sigla, nome: sp.nome } })) });
+      map.getSource("limites")._loadedOnce = true;
+    }
+    view.subContagem = porSub;
+    view.subBreaks = quebras(ctx.limites.data.subprefeituras.map((sp) => porSub.get(sp.sigla) || 0).filter((n) => n > 0), HEX_RAMP.length);
+    const cor = ["match", ["get", "sigla"], ...ctx.limites.data.subprefeituras.flatMap((sp) => [sp.sigla, corDaContagem(porSub.get(sp.sigla) || 0)]), "#FFFFFF"];
+    map.setPaintProperty("limites-fill", "fill-color", comCoropleta ? cor : "#FFFFFF");
+    map.setPaintProperty("limites-fill", "fill-opacity", comCoropleta ? 0.72 : 0);
+    map.setFilter("limites-sel", ["==", ["get", "sigla"], store.filters.subprefeitura || ""]);
+  }
+  vis(["limites-fill", "limites-line", "limites-sel", "limites-label"], view.layers.limites && ctx.limites.status === "ok");
 
   const st = currentStations();
   const vals = st.map((s) => ({ s, r: rainValue(s) }));
@@ -344,7 +370,9 @@ function refreshData() {
   if (sp !== lastSubpref) {
     const prev = lastSubpref;
     lastSubpref = sp;
-    if (sp) {
+    const lim = ctx.limites.status === "ok" ? ctx.limites.data.subprefeituras.find((x) => x.sigla === sp) : null;
+    if (lim) map.fitBounds([[lim.envelope[0], lim.envelope[1]], [lim.envelope[2], lim.envelope[3]]], { padding: 60, duration: 600 });
+    else if (sp) {
       const bb = bboxOf([...occ, ...st, ...nv]);
       if (bb) map.fitBounds(bb, { padding: 60, maxZoom: 14, duration: 600 });
     } else if (prev) map.easeTo({ center: CONFIG.MAP_CENTER, zoom: CONFIG.MAP_ZOOM, duration: 600 });
@@ -352,6 +380,11 @@ function refreshData() {
   renderScope(occ, vals);
   renderLayersPanel();
   renderLegend();
+}
+
+function corDaContagem(n) {
+  if (!n) return "#F8FAFC";
+  return HEX_RAMP[Math.min(HEX_RAMP.length - 1, view.subBreaks.filter((b) => n >= b).length)];
 }
 
 function atualizarHex(occ = currentOcc()) {
@@ -421,9 +454,19 @@ function renderLegend() {
   const aberta = host.querySelector("details")?.open ?? window.innerWidth > 700;
   const zoom = map?.getZoom() ?? CONFIG.MAP_ZOOM;
   const blocos = [];
+  const comCoropleta = view.coropletico && view.layers.limites && ctx.limites.status === "ok";
+  if (comCoropleta) {
+    const br = view.subBreaks;
+    const faixas = HEX_RAMP.slice(0, br.length + 1).map((c, i) => {
+      const de = i === 0 ? 1 : br[i - 1], ate = i < br.length ? br[i] - 1 : null;
+      return `<span class="legend__faixa"><i style="background:${c}"></i>${ate === null ? `${fmtInt(de)}+` : de === ate ? fmtInt(de) : `${fmtInt(de)}–${fmtInt(ate)}`}</span>`;
+    }).join("");
+    blocos.push(`<div class="legend__bloco"><strong>Ocorrências por subprefeitura</strong><div class="legend__faixas">${faixas}</div><small>Contagem no recorte; subprefeituras maiores tendem a somar mais registros.</small></div>`);
+  } else if (view.layers.limites && ctx.limites.status === "ok")
+    blocos.push(`<div class="legend__bloco"><strong>Subprefeituras</strong><div class="legend__row"><span class="legend__line" style="height:2px;background:#475569"></span>limite <span class="legend__line" style="height:3px;background:#155EEF"></span>selecionada</div></div>`);
   if (view.layers.ocorrencias && ctx.occ.status === "ok") {
     const tipos = Object.entries(TIPO_ICONE).map(([t, g]) => `<span class="legend__tipo"><span class="legend__icone" style="background:${TYPE_COLORS[t]}">${icon(g)}</span>${esc(t)}</span>`).join("");
-    if (zoom < ZOOM_PONTOS) {
+    if (zoom < ZOOM_PONTOS && !comCoropleta) {
       const br = view.hexBreaks;
       const faixas = HEX_RAMP.slice(0, br.length + 1).map((c, i) => {
         const de = i === 0 ? 1 : br[i - 1], ate = i < br.length ? br[i] - 1 : null;
@@ -486,7 +529,9 @@ function renderLayersPanel() {
     layerRow("suscetibilidade", "Suscetibilidade a inundação", "SGB/CPRM, carta de 2015 · não é previsão",
       `<div class="note">Predisposição do terreno a inundar, sem considerar a chuva. ${susc.meta ? natureBadge(susc.meta) : ""}</div>`,
       { disabled: susc.status !== "ok", reason: "Suscetibilidade não publicada nesta versão." }),
-    layerRow("limites", "Limites administrativos", "", "", { disabled: true, reason: naoPub.limites || "Não publicado." }),
+    layerRow("limites", "Subprefeituras", "Limites do GeoSampa · clique para ver o resumo",
+      `<label class="check"><input type="checkbox" data-coropletico ${view.coropletico ? "checked" : ""}><span class="check__text"><span>Colorir pelo número de ocorrências</span><span class="check__hint">Substitui os hexágonos enquanto estiver ligado.</span></span></label>`,
+      { disabled: ctx.limites.status !== "ok", reason: naoPub.limites || "Limites não publicados nesta versão." }),
     layerRow("setores", "Densidade populacional (IBGE)", "Setores censitários do Censo 2022 · hab/km²", legendaGeo("setores"),
       { disabled: !publicado("setores"), reason: naoPub.setores || "Não publicado." }),
     layerRow("vias", "Vias principais (OpenStreetMap)", "Expressas, arteriais, coletoras e acessos", legendaGeo("vias"),
@@ -501,6 +546,11 @@ function renderLayersPanel() {
       host.querySelector(`[data-layer="${cb.dataset.layer}"]`)?.focus();
     }),
   );
+  host.querySelector("[data-coropletico]")?.addEventListener("change", (e) => {
+    view.coropletico = e.target.checked;
+    refreshData();
+    host.querySelector("[data-coropletico]")?.focus();
+  });
   host.querySelectorAll("[data-win]").forEach((b) =>
     b.addEventListener("click", () => {
       view.rainWindow = b.dataset.win;
@@ -683,6 +733,27 @@ function showLevel(id) {
     </dl>
     <a class="btn btn--secondary btn--sm" href="#/monitoramento?nivel=${encodeURIComponent(id)}">${icon("activity")}Abrir série no monitoramento</a>
     <hr class="divider">${provenance(ctx.nivel.meta)}`, [s.lon, s.lat]);
+}
+
+function showSubpref(sigla, lngLat) {
+  const sp = ctx.limites.data.subprefeituras.find((x) => x.sigla === sigla);
+  if (!sp) return;
+  const occ = currentOcc().filter((o) => o.subprefeitura === sigla);
+  const tipos = [...groupCount(occ.map((o) => o.tipo))].sort((a, b) => b[1] - a[1]);
+  const estacoes = ctx.st.est.status === "ok" ? ctx.st.est.data.chuva.filter((s) => s.subprefeitura === sigla).length : 0;
+  const per = resolvePeriod();
+  openDetail(`Subprefeitura ${sp.nome}`, `
+    <div class="mini-kpis">
+      <div class="mini-kpi"><span>Ocorrências</span><b>${fmtInt(occ.length)}</b><small>${esc(per.texto)}</small></div>
+      <div class="mini-kpi"><span>Por km²</span><b>${fmt1(occ.length / sp.area_km2)}</b><small>${fmt1(sp.area_km2)} km² de área</small></div>
+    </div>
+    ${tipos.length ? `<ul class="mini-bars">${tipos.map(([t, n]) => `<li><span class="mini-bars__tipo"><span class="legend__icone legend__icone--sm" style="background:${TYPE_COLORS[t]}">${icon(TIPO_ICONE[t])}</span>${esc(t)}</span><span class="mini-bars__bar"><i style="width:${(n / occ.length) * 100}%;background:${TYPE_COLORS[t]}"></i></span><b>${fmtInt(n)}</b></li>`).join("")}</ul>` : stateBlock("empty", "Nenhuma ocorrência no recorte")}
+    <dl class="dl"><dt>Estações de chuva</dt><dd>${fmtInt(estacoes)}</dd><dt>Sigla</dt><dd class="mono">${esc(sp.sigla)}</dd></dl>
+    <div class="row">${store.filters.subprefeitura === sigla
+      ? `<button type="button" class="btn btn--secondary btn--sm" id="sub-filtro" data-sigla="">${icon("reset")}Voltar ao município</button>`
+      : `<button type="button" class="btn btn--primary btn--sm" id="sub-filtro" data-sigla="${esc(sigla)}">${icon("filter")}Filtrar por esta subprefeitura</button>`}</div>
+    <hr class="divider">${provenance(ctx.limites.meta)}`, [lngLat.lng, lngLat.lat]);
+  $("#sub-filtro").addEventListener("click", (e) => store.setFilters({ subprefeitura: e.currentTarget.dataset.sigla }));
 }
 
 function showSetor(i, lngLat) {

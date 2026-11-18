@@ -53,6 +53,7 @@ Cada arquivo é `{ "meta": {...}, "data": ... }`. Campos de `meta`:
 
 | Arquivo | `data` | Origem na Gold |
 |---|---|---|
+| `limites.json` | `{ subprefeituras: [{ sigla, nome, area_km2, envelope: [lon_min, lat_min, lon_max, lat_max], geometria }] }`; `geometria` como em `suscetibilidade.json` | `dim_geosampa_subprefecture_limits` (shapefile do GeoSampa, carga manual), simplificada em 15 m. Só existe depois que o shapefile for enviado ao Volume |
 | `subprefeituras.json` | `[{ sigla, nome }]` | `dim_geosampa_subprefecture_area` (`SIG_SUBPREFEITURA`, `NOM_SUBPREFEITURA`); `sigla` é o código canônico usado pela fato |
 | `ocorrencias.json` | colunar: `{ ano_origem[], id[], data[], tipo[], subprefeitura[], lat[], lon[], grau_susc_inundacao[] }` | `fact_geosampa_flooding_events` + `dim_tempo` + dimensões de tipo e subprefeitura; `grau_susc_inundacao` é o maior grau (1 a 3) das áreas de inundação do SGB que contêm o ponto, `0` fora delas e nulo quando o cruzamento não foi feito |
 | `estacoes.json` | `{ chuva: [{ id, codigo, rede, nome, grandeza, instituicao, lat, lon, subprefeitura, ativa, tabela }], nivel: [... + curso_dagua, unidade] }` | `dim_cemaden_stations`, `dim_sibh_sensors`, `dim_inmet_stations`. `id` = `<rede>:<código>` |
@@ -72,7 +73,7 @@ A tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_we
 
 Particularidades dos dados reais:
 
-- **Estações:** `id` = `<rede>:<código>` (`cemaden:`, `sibh:`, `inmet:`). `subprefeitura` é `null`, porque a Gold não tem essa informação das estações; o filtro por subprefeitura não as inclui. Só entram estações com coordenadas no envelope do município e que estejam ativas ou tenham leitura.
+- **Estações:** `id` = `<rede>:<código>` (`cemaden:`, `sibh:`, `inmet:`). `subprefeitura` é a sigla do limite que contém a estação (ponto em polígono com `limites.json`); fica `null` fora do município ou enquanto os limites não forem publicados. Só entram estações com coordenadas no envelope do município e que estejam ativas ou tenham leitura.
 - **Chuva diária** (de 2020-01-01 até o dia de `meta.referencia`): soma das horas no fuso de São Paulo; dia sem leitura é `null`, nunca zero. Estação com mais de um sensor (CEMADEN): vale o maior valor de cada hora.
 - **Chuva horária:** últimas 168 horas; `meta.referencia` é a última hora com leitura em qualquer rede.
 - **Nível:** média por hora (7 dias) e média diária (365 dias), sempre em metros (`meta.unidade = "m"`). É a cota informada pela fonte (altitude da superfície da água na referência do sensor), não a profundidade. `meta.unidade_origem` diz em que unidade a fonte publica (`cm` no SIBH); sem esse campo, o app suspende as regras de alerta de nível.
