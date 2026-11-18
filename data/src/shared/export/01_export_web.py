@@ -7,7 +7,7 @@
 # MAGIC 1. Roda depois de todas as fontes (`run_if: ALL_DONE`).
 # MAGIC 2. Cada fonte só é exportada se a qualidade Gold dela rodou **nesta execução** do job e não teve falha `ERRO`.
 # MAGIC 3. Fontes exportadas hoje: GeoSampa (ocorrências e subprefeituras), CEMADEN, SIBH e INMET (estações, chuva diária e horária) e SIBH (nível). IBGE, OSM e a suscetibilidade do SGB entram em etapas posteriores.
-# MAGIC 4. O pacote é gravado no Volume `fiap_analytics.gold.chuvasegura_web` (o `manifest.json` por último). **Tudo ou nada no site:** só vai ao GitHub se todas as fontes pedidas passaram. Se alguma falhar, o site continua com a versão anterior, o que passou fica no Volume para conferência e a tarefa termina com erro.
+# MAGIC 4. O pacote é gravado no Volume `fiap_analytics.gold.chuvasegura_web` (o `manifest.json` por último) e vai ao GitHub com as fontes que passaram. **Fonte com falha não derruba as outras:** os conjuntos dela continuam no site com a versão já publicada (o arquivo não é sobrescrito e o manifesto marca `mantido`). Falha que vem de antes do export (qualidade Gold reprovada ou que não rodou nesta execução) já aparece na tarefa da própria fonte, então o export termina com sucesso; erro no código do export termina a tarefa com erro.
 # MAGIC 5. O commit só acontece se os dados mudaram (compara o SHA-256 de cada conjunto com o manifesto publicado).
 # MAGIC
 # MAGIC Widgets: `inicio_execucao` (preenchido pelo job; vazio numa execução manual = vale a qualidade mais recente), `fontes` (lista; tire uma fonte que ainda não rodou, como o INMET antes do backfill), `github_publicar` (`sim`/`nao`), `github_repo`, `github_branch` e `unidade_nivel_origem` (unidade da cota do SIBH, `cm` por padrão: o export converte para metros).
@@ -81,6 +81,10 @@ print(f"Publicação {VERSAO} em {AGORA} | fontes: {sorted(FONTES)} | início do
 _qualidade_cache = {}
 
 
+class FonteIndisponivel(RuntimeError):
+    """A fonte não ficou pronta nesta execução (carga ou qualidade Gold falhou antes do export)."""
+
+
 def qualidade_gold(fonte):
     """Resultado da execução de qualidade Gold mais recente da fonte. Falha se ela teve ERRO ou, dentro do job,
     se não rodou nesta execução (a carga da fonte falhou antes)."""
@@ -88,23 +92,23 @@ def qualidade_gold(fonte):
         return _qualidade_cache[fonte]
     tabela = f"{CATALOG}.bronze.{fonte}_data_quality_log"
     if not spark.catalog.tableExists(tabela):
-        raise RuntimeError(f"Tabela de qualidade não encontrada: {tabela}")
+        raise FonteIndisponivel(f"Tabela de qualidade não encontrada: {tabela}")
     dq = spark.table(tabela).where((F.col("etapa") == "gold") & (F.col("fonte") == fonte))
     ultima = dq.orderBy(F.col("executado_em").desc()).select("batch_id", "executado_em").first()
     if not ultima:
-        raise RuntimeError(f"Não há execução de qualidade Gold de {fonte}.")
+        raise FonteIndisponivel(f"Não há execução de qualidade Gold de {fonte}.")
     if INICIO_EXECUCAO:
         inicio = spark.range(1).select(F.lit(INICIO_EXECUCAO).cast("timestamp").alias("t")).first()["t"]
         if inicio is None:
             raise ValueError(f"inicio_execucao inválido: {INICIO_EXECUCAO!r}")
         if ultima["executado_em"] < inicio:
-            raise RuntimeError(
+            raise FonteIndisponivel(
                 f"A qualidade Gold de {fonte} não rodou nesta execução (última em {ultima['executado_em']}): a carga falhou antes.")
     run = dq.where(F.col("batch_id") == ultima["batch_id"])
     erros = run.where((F.col("severidade") == "ERRO") & (F.col("status") == "FALHA")).count()
     avisos = run.where((F.col("severidade") == "AVISO") & (F.col("status") == "FALHA")).count()
     if erros:
-        raise RuntimeError(f"A qualidade Gold de {fonte} tem {erros} regra(s) ERRO em falha.")
+        raise FonteIndisponivel(f"A qualidade Gold de {fonte} tem {erros} regra(s) ERRO em falha.")
     quando = ultima["executado_em"].isoformat(timespec="seconds")
     estado = "aprovado_com_avisos" if avisos else "aprovado"
     descricao = (f"Regras Gold de {fonte} executadas em {quando} (UTC): sem falhas ERRO; {avisos} aviso(s)." if avisos
@@ -424,7 +428,7 @@ def tentar(nome, fn):
     try:
         return fn()
     except Exception as exc:  # noqa: BLE001 - registrado e relançado no fim
-        falhas.append((nome, f"{type(exc).__name__}: {exc}"))
+        falhas.append((nome, f"{type(exc).__name__}: {exc}", isinstance(exc, FonteIndisponivel)))
         print(f"FALHA em {nome}: {exc}")
         return None
 
@@ -481,10 +485,27 @@ if chuva_res:
 
 # COMMAND ----------
 
-if not datasets:
-    raise RuntimeError("Nada foi exportado: " + "; ".join(f"{n}: {m}" for n, m in falhas))
+MOTIVO_FALHA = {n: m for n, m, _ in falhas}
+FALHAS_NO_EXPORT = [(n, m) for n, m, a_montante in falhas if not a_montante]
 
-MOTIVO_FALHA = {n: m for n, m in falhas}
+# Conjunto de uma fonte que falhou fica com a versão já publicada: entra no manifesto novo e o arquivo não é reenviado.
+FONTES_DO_CONJUNTO = {
+    "subprefeituras": ("geosampa",), "ocorrencias": ("geosampa",),
+    "chuva_diaria": ("chuva", "cemaden", "sibh", "inmet"), "chuva_horaria": ("chuva", "cemaden", "sibh", "inmet"),
+    "estacoes": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh", "chuva"),
+}
+token = dbutils.secrets.get(scope="github", key="token") if GITHUB_PUBLICAR else None
+atual = github_publish.ler_json(token, GITHUB_REPO, GITHUB_BRANCH, f"{PASTA_SITE}/manifest.json") if token else None
+mantidos = []
+if atual and atual.get("modo") == "gold":
+    for d in atual.get("datasets", []):
+        if d["id"] not in publicados and any(n in MOTIVO_FALHA for n in FONTES_DO_CONJUNTO.get(d["id"], ())):
+            datasets.append({**d, "mantido": True})
+            publicados.add(d["id"])
+            mantidos.append(d["id"])
+
+if not datasets:
+    raise RuntimeError("Nada foi exportado: " + "; ".join(f"{n}: {m}" for n, m, _ in falhas))
 CATALOGO_NAO_PUBLICADO = [
     ("chuva", "Chuva observada", "chuva_diaria"), ("nivel", "Nível de rios e córregos", "nivel"),
     ("suscetibilidade", "Suscetibilidade a inundações", None), ("avisos_oficiais", "Avisos oficiais", None),
@@ -511,8 +532,9 @@ for id_, titulo, ds in CATALOGO_NAO_PUBLICADO:
 manifesto = {
     "produto": "ChuvaSegura-SP", "modo": "gold",
     "aviso": "Dados reais publicados a partir das tabelas Gold do Databricks. Somente os conjuntos listados estão disponíveis nesta publicação.",
-    "versao": VERSAO, "referencia": max(referencias), "publicado_em": AGORA, "catalogo": CATALOG,
-    "datasets": datasets, "linhagem": linhagem, "nao_publicados": nao_publicados,
+    "versao": VERSAO, "referencia": max(referencias) if referencias else atual["referencia"], "publicado_em": AGORA,
+    "catalogo": CATALOG, "datasets": datasets, "linhagem": linhagem, "nao_publicados": nao_publicados,
+    "falhas": [{"fonte": n, "motivo": m} for n, m, _ in falhas],
 }
 arquivos["manifest.json"] = json_bytes(manifesto)
 
@@ -531,13 +553,9 @@ for nome in [n for n in arquivos if n != "manifest.json"] + ["manifest.json"]:  
     print(f"Volume: {nome} ({len(arquivos[nome]) / 1024:.1f} KB)")
 
 commit = None
-if falhas:
-    print("Há fontes com falha: o site NÃO foi atualizado (tudo ou nada). O pacote parcial está no Volume.")
-elif not GITHUB_PUBLICAR:
+if not GITHUB_PUBLICAR:
     print("github_publicar = nao: pacote só no Volume.")
 else:
-    token = dbutils.secrets.get(scope="github", key="token")
-    atual = github_publish.ler_json(token, GITHUB_REPO, GITHUB_BRANCH, f"{PASTA_SITE}/manifest.json")
     hashes_atuais = {d["id"]: d.get("sha256_dados") for d in (atual or {}).get("datasets", [])}
     hashes_novos = {d["id"]: d["sha256_dados"] for d in datasets}
     if atual and atual.get("modo") == "gold" and hashes_atuais == hashes_novos:
@@ -549,5 +567,9 @@ else:
             f"Dados: publicação automática {AGORA}\n\nConjuntos: {resumo}. Gerado por data/src/shared/export/01_export_web.py.")
         print(f"Commit {commit} em {GITHUB_REPO}@{GITHUB_BRANCH}: a Vercel publica o site em seguida." if commit else "GitHub: sem mudanças.")
 
-if falhas:
-    raise RuntimeError("Exportação incompleta: " + " | ".join(f"{n}: {m}" for n, m in falhas))
+for n, m, a_montante in falhas:
+    print(f"{'Fonte indisponível' if a_montante else 'ERRO NO EXPORT'} — {n}: {m}")
+if mantidos:
+    print(f"Mantidos no site com a versão anterior: {', '.join(mantidos)}.")
+if FALHAS_NO_EXPORT:
+    raise RuntimeError("Erro no export: " + " | ".join(f"{n}: {m}" for n, m in FALHAS_NO_EXPORT))

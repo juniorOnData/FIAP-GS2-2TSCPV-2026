@@ -1,17 +1,18 @@
-# Job principal do ChuvaSegura: orquestra o pipeline inteiro numa execução diária.
+# Job principal do ChuvaSegura: orquestra o pipeline inteiro a cada 2 horas (00:00, 02:00, ..., 22:00 de São Paulo).
 #   1. dim_tempo: a única dimensão compartilhada, criada uma vez antes de todas as fontes.
 #   2. As sete fontes, cada uma no seu job (landing até a Gold, com as travas de qualidade), em paralelo.
 #   3. export_web: publica a Gold no Volume e, por commit, no repositório (a Vercel republica o site). Roda mesmo
-#      se alguma fonte falhar (ALL_DONE); o notebook só exporta fontes cuja qualidade Gold passou nesta execução
-#      e só atualiza o site se todas as fontes pedidas passaram.
+#      se alguma fonte falhar (ALL_DONE); o notebook só exporta fontes cuja qualidade Gold passou nesta execução.
+#      Os conjuntos de uma fonte que falhou continuam no site com a versão anterior.
 # Os jobs das fontes não têm agenda própria: só este job tem agenda.
 # Os job_id são os do workspace; num Databricks Asset Bundle, troque por ${resources.jobs.<chave>.id}.
 resources:
   jobs:
     ChuvaSegura:
       name: ChuvaSegura
+      max_concurrent_runs: 1  # com a fila ligada, uma execução que passe de 2 horas adia a próxima em vez de sobrepor
       schedule:
-        quartz_cron_expression: "0 0 7 * * ?"
+        quartz_cron_expression: "0 0 0/2 * * ?"
         timezone_id: America/Sao_Paulo
         pause_status: UNPAUSED
       tasks:

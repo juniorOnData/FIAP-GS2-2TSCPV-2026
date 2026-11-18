@@ -66,7 +66,7 @@ Para manter os arquivos leves, simplifique as geometrias para a escala de visual
 
 ## Exportação automática
 
-A tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_web.py`) roda depois de todas as fontes, confere se a qualidade Gold de cada uma passou **na mesma execução** e publica o pacote em `/Volumes/fiap_analytics/gold/chuvasegura_web/` e, por commit, em `app/data/gold/`. Se alguma fonte pedida falhar, nada vai ao repositório (o site mantém a versão anterior).
+A tarefa `export_web` do job `ChuvaSegura` (`data/src/shared/export/01_export_web.py`) roda depois de todas as fontes, confere se a qualidade Gold de cada uma passou **na mesma execução** e publica o pacote em `/Volumes/fiap_analytics/gold/chuvasegura_web/` e, por commit, em `app/data/gold/`. O job roda a cada 2 horas. Se uma fonte falhar, as outras são publicadas e os conjuntos dela continuam com a versão anterior: a entrada no manifesto é copiada da publicação anterior com `mantido: true`, o arquivo não é reenviado, e `falhas` lista o motivo.
 
 Particularidades dos dados reais:
 
