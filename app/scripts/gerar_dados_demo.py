@@ -546,7 +546,7 @@ def main() -> None:
         "datasets": datasets,
         "linhagem": linhagem,
         "nao_publicados": [
-            {"id": "limites", "titulo": "Limites administrativos", "motivo": "A dimensão de subprefeituras da Gold não tem geometria."},
+            {"id": "limites", "titulo": "Limites administrativos", "motivo": "O pacote de demonstração não inclui os limites das subprefeituras; eles vêm só da publicação real (GeoSampa)."},
             {"id": "setores", "titulo": "Setores censitários (IBGE)", "motivo": "O pacote de demonstração não inclui setores censitários; eles vêm só da publicação real (IBGE)."},
             {"id": "vias", "titulo": "Rede viária (OpenStreetMap)", "motivo": "O pacote de demonstração não inclui a rede viária; ela vem só da publicação real (OpenStreetMap)."},
         ],

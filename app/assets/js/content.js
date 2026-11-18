@@ -14,7 +14,7 @@ export const FONTES = [
       "A data da ocorrência não tem hora, o que impede cruzar com a chuva hora a hora.",
       "Registros dependem de chamados e vistorias: ausência de registro não significa ausência de evento.",
       "A geometria vem em SIRGAS 2000 / UTM 23S (EPSG 31983) e é convertida para latitude e longitude na Silver.",
-      "A dimensão de subprefeituras não tem geometria (vem de uma relação de agrupamentos), por isso não há limites no mapa.",
+      "Os limites das subprefeituras vêm do shapefile do GeoSampa, enviado ao Volume à mão: o portal protege os downloads com CAPTCHA. A subprefeitura das estações é calculada pela localização dentro desses limites.",
     ],
     url: "https://geosampa.prefeitura.sp.gov.br/",
   },
@@ -151,7 +151,7 @@ export const KB = [
   { id: "faq-atualizacao", tipo: "faq", titulo: "Com que frequência os dados são atualizados?", texto: "O pipeline roda a cada 2 horas e publica o site em seguida: chuva e nível chegam com algumas horas de atraso em relação à leitura. Ocorrências: arquivos anuais do GeoSampa, recarregados quando mudam. Suscetibilidade e IBGE: conferência mensal. Cada painel mostra a data de referência e marca o dado como desatualizado quando passa do limite.", tags: "frequencia atualizacao horario" },
   { id: "faq-demo", tipo: "faq", titulo: "O que é o modo demonstração?", texto: "Quando a publicação usa o pacote de demonstração, todos os valores são sintéticos, gerados para mostrar a interface. Um banner roxo fica visível em todas as telas e cada indicador traz o aviso “Valor demonstrativo, sem conexão com dados reais”.", tags: "demo sintetico", link: "#/dados" },
   { id: "faq-perfis", tipo: "faq", titulo: "Como funcionam os perfis?", texto: "Os perfis (gestão, técnico e público) só ajustam linguagem e atalhos. Não há login nem controle de acesso nesta versão.", tags: "perfil login acesso", link: "#/perfil" },
-  { id: "faq-limites", tipo: "faq", titulo: "Por que o mapa não mostra os limites das subprefeituras?", texto: "A dimensão de subprefeituras da Gold vem de uma relação de agrupamentos, sem geometria. Ao filtrar uma subprefeitura, o mapa aproxima os pontos dela.", tags: "limite subprefeitura mapa" },
+  { id: "faq-limites", tipo: "faq", titulo: "De onde vêm os limites das subprefeituras?", texto: "Do shapefile oficial do GeoSampa (Limites Administrativos). No mapa, a camada Subprefeituras mostra os limites e os nomes; clicar numa subprefeitura abre o resumo do recorte e permite filtrar por ela. A opção de colorir pelo número de ocorrências compara as subprefeituras pela contagem, que tende a ser maior nas maiores.", tags: "limite subprefeitura mapa" },
   { id: "faq-exportar", tipo: "faq", titulo: "Posso exportar os dados?", texto: "Sim: no mapa, o botão Exportar recorte gera um CSV das ocorrências filtradas. Respeite as licenças das fontes; em demonstração, o arquivo é marcado como sintético.", tags: "csv download exportar" },
   { id: "faq-risco", tipo: "faq", titulo: "A plataforma calcula risco de alagamento?", texto: "Não nesta versão. Score ou classe de risco só entram após o gate de Data Science (alvo definido, validação temporal, baseline e explicação dos fatores). Hoje há análise histórica e suscetibilidade.", tags: "risco score modelo previsao" },
 
