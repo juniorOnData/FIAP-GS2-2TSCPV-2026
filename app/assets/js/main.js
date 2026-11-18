@@ -53,7 +53,7 @@ function renderShell(name) {
   app.innerHTML = `<div class="shell" id="shell">
     ${demoBanner()}
     <aside class="sidebar" id="sidebar" aria-label="Navegação principal">
-      <a class="brand" href="#/">${LOGO}<span class="brand__name">Chuva<span>Segura</span>-SP<span class="brand__tag">Urban Intelligence</span></span></a>
+      <a class="brand" href="#/">${LOGO}<span class="brand__name">Chuva<span>Segura</span>-SP</span></a>
       <nav class="nav">${navHtml(name)}</nav>
       <div class="sidebar__foot">
         <div>${isDemo() ? "Demonstração" : "Gold"} · ${esc(m?.versao || "")}</div>
@@ -94,7 +94,7 @@ async function route() {
     current = { name: "", page: portal };
     app.innerHTML = "";
     current.cleanup = await portal.render(app, { params });
-    document.title = "ChuvaSegura-SP — Urban Intelligence";
+    document.title = "ChuvaSegura-SP";
     return;
   }
   const r = ROUTES[name];

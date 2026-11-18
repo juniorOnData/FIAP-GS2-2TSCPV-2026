@@ -10,7 +10,11 @@
 .hero__lead { font-size: var(--fs-lg); color: var(--text-2); max-width: 600px; margin-bottom: var(--s-6); line-height: 1.55; }
 .hero__note { margin-top: var(--s-5); font-size: var(--fs-sm); color: var(--text-3); display: flex; align-items: center; gap: var(--s-2); }
 .hero__note svg { width: 16px; height: 16px; flex-shrink: 0; }
-.hero__svg { width: 100%; height: auto; filter: drop-shadow(0 20px 40px rgba(21, 94, 239, 0.12)); }
+.hero__visual { position: relative; padding-bottom: 18%; }
+.hero__foto { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 24px; box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18); }
+.hero__mapa { position: absolute; left: -6%; bottom: 0; width: 56%; margin: 0; background: #fff; border: 6px solid #fff; border-radius: 18px; box-shadow: 0 20px 40px rgba(21, 94, 239, 0.18); overflow: hidden; }
+.hero__mapa img { display: block; width: 100%; height: auto; border-radius: 12px; }
+.hero__mapa figcaption { position: absolute; top: 10px; left: 10px; background: rgba(255, 255, 255, 0.92); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 11px; color: var(--text-3); }
 .portal__band { background: var(--surface); border-block: 1px solid var(--border); padding: var(--s-8) 0; }
 .portal__inner { max-width: var(--content-max); margin: 0 auto; padding: 0 var(--s-5); }
 .portal__h2 { font-size: clamp(24px, 3vw, 36px); font-weight: 800; max-width: 880px; letter-spacing: -0.02em; }
@@ -26,6 +30,7 @@
   .hero { grid-template-columns: minmax(0, 1fr); padding-top: var(--s-5); gap: var(--s-5); }
   .portal__links { display: none; }
   .portal__nav .btn { margin-left: auto; }
+  .hero__mapa { left: 0; width: 58%; border-width: 4px; }
 }
 
 /* ============================================================ visão geral */
