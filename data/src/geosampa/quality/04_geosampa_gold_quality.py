@@ -8,6 +8,13 @@
 # MAGIC 2. Regras `AVISO` só registram.
 # MAGIC 3. Resultados em `fiap_analytics.bronze.geosampa_data_quality_log`, uma linha por regra e execução.
 
+# MAGIC
+# MAGIC ## Função e regras avaliadas
+# MAGIC
+# MAGIC `membro_desconhecido(dim, chave)` cria uma regra que confirma se a dimensão contém exatamente uma linha com chave `-1`. A lista `regras` aplica verificações de volume e unicidade, compara a fato com a Silver por ano, confere as referências dimensionais e a cobertura contínua da `dim_tempo`, e registra ocorrências com localização ou classificação desconhecida.
+# MAGIC
+# MAGIC `DataQuality.executar(regras)` grava os resultados em `geosampa_data_quality_log`. As regras `ERRO` reprovadas fazem `dq.validar(resultados)` interromper a tarefa; regras `AVISO` permanecem registradas sem bloquear o job.
+
 # COMMAND ----------
 
 import os

@@ -11,6 +11,15 @@
 -- MAGIC 3. Latitude e longitude da ocorrência ficam na fato, para mapas e para o cruzamento com as estações de chuva.
 -- MAGIC 4. Chaves estrangeiras declaradas para a `dim_tempo` e as dimensões do GeoSampa (informativas no Unity Catalog). Tabela com liquid clustering por data e subprefeitura.
 
+-- MAGIC
+-- MAGIC ## Como a carga incremental decide o que atualizar
+-- MAGIC
+-- MAGIC A view temporária de staging resolve as chaves das dimensões com `COALESCE(..., -1)` e prepara a linha que será gravada na fato. As views de resumo calculam, para cada ano, a quantidade de linhas e uma assinatura com `xxhash64` sobre os atributos analíticos.
+-- MAGIC
+-- MAGIC Um ano é recarregado quando ainda não existe na Gold, quando a contagem diverge ou quando a assinatura muda. Antes da inserção, o notebook remove os anos que serão recarregados e os que foram removidos da Silver. A exclusão de todos os anos não ocorre quando a Silver está vazia: essa condição protege a fato contra uma limpeza causada por uma carga sem dados.
+-- MAGIC
+-- MAGIC Como o identificador da ocorrência pode se repetir em arquivos de anos diferentes, a unicidade é verificada pela combinação `NUM_ANO_ORIGEM` + `NUM_ID_OCORRENCIA`.
+
 -- COMMAND ----------
 
 CREATE TABLE IF NOT EXISTS fiap_analytics.gold.fact_geosampa_flooding_events (

@@ -6,6 +6,13 @@
 -- MAGIC
 -- MAGIC Membro desconhecido: a linha `COD_DIM_SUBPREFEITURA = -1` (`NÃO INFORMADO`) recebe as ocorrências sem subprefeitura identificada, para a fato nunca ficar com chave nula.
 
+-- MAGIC
+-- MAGIC ## Como a dimensão é atualizada
+-- MAGIC
+-- MAGIC Primeiro, o `MERGE` insere o membro desconhecido `-1` uma única vez. Em seguida, relaciona cada unidade da Bronze pela sigla oficial `sg_subprefeitura`.
+-- MAGIC
+-- MAGIC Se nome, sigla GeoSampa, endereço, agrupamento ou tipo de unidade mudar, a linha existente é atualizada e `DAT_ULT_ATUALIZACAO` recebe o instante da alteração. Uma unidade nova recebe uma chave identity e as datas de carga/atualização. Assim, a chave substituta continua estável entre execuções.
+
 -- COMMAND ----------
 
 CREATE TABLE IF NOT EXISTS fiap_analytics.gold.dim_geosampa_subprefecture_area (

@@ -1,26 +1,19 @@
-# Guia técnico do pipeline GeoSampa
+# Documentação Técnica - GeoSampa
 
 Este documento descreve como o código do projeto carrega o histórico de ocorrências do GeoSampa, padroniza os dados espaciais, monta o modelo Gold e valida o resultado. Os caminhos citados são relativos a `data/`.
 
-## Visão do fluxo
+## Visão geral
 
-O fluxo tem duas entradas independentes. Os arquivos históricos de ocorrências são carregados no volume e processados para Bronze; a tabela de subprefeituras é recriada por SQL a partir da relação do Anexo IX. As duas tarefas alimentam a Silver. Depois da qualidade Silver, as dimensões e a fato são atualizadas e a qualidade Gold valida o resultado.
+O pipeline parte de duas entradas. Os arquivos históricos de ocorrências são carregados no volume e processados para Bronze; a tabela de subprefeituras é recriada por SQL a partir da relação do Anexo IX. O notebook Silver padroniza as ocorrências e associa a sigla da subprefeitura. A qualidade Silver libera as transformações que dependem das ocorrências; a dimensão de subprefeituras pode ser atualizada assim que sua tabela Bronze estiver pronta. A qualidade Gold valida o modelo analítico ao final.
 
-```mermaid
-flowchart TD
-  A[GeoPackage de ocorrências no Volume] --> B[Bronze: ocorrências]
-  C[SQL do Anexo IX] --> D[Bronze: subprefeituras]
-  B --> E[Silver: ocorrências tipadas e georreferenciadas]
-  D --> E
-  E --> F{Qualidade Silver}
-  D --> G[Gold: dimensão de subprefeituras]
-  F --> H[Gold: dimensão de tipos]
-  F --> I[Gold: fato de ocorrências]
-  G --> I
-  H --> I
-  J[Gold: dim_tempo] --> I
-  I --> K{Qualidade Gold}
-```
+Na execução, o job realiza estas etapas:
+
+1. Carrega os GeoPackages recebidos no volume e atualiza a tabela Bronze de ocorrências.
+2. Recria a tabela Bronze de subprefeituras a partir da lista mantida no notebook SQL.
+3. Gera a tabela Silver com campos tipados, tipos de ocorrência padronizados e coordenadas derivadas.
+4. Executa as regras de qualidade Silver.
+5. Atualiza a dimensão de subprefeituras após sua Bronze e a dimensão de tipos após a qualidade Silver.
+6. Atualiza a fato por ano de origem e executa a qualidade Gold.
 
 O job da fonte é definido em [`jobs/chuvasegura_geosampa.job.yml`](jobs/chuvasegura_geosampa.job.yml). Ele não tem agenda própria: é executado pelo job principal `ChuvaSegura`, depois da dimensão compartilhada de tempo.
 
@@ -119,3 +112,5 @@ Se a tarefa Silver falhar, verifique primeiro a unicidade do ano/arquivo, o SRID
 - Log de ingestão: [`src/common/ingestion_log.py`](src/common/ingestion_log.py).
 - Log e regras de qualidade: [`src/common/data_quality.py`](src/common/data_quality.py).
 - Inventário e visão geral das fontes: [`README.md`](README.md#geosampa).
+
+Os notebooks contêm notas junto às etapas e funções que executam. Este guia reúne o contexto do pipeline, as dependências entre as camadas e a operação da fonte.

@@ -6,6 +6,11 @@
 -- MAGIC
 -- MAGIC Membro desconhecido: a linha `COD_DIM_OCORRENCIA = -1` (`Não informado`) recebe as ocorrências cujo tipo não for encontrado na dimensão, para a fato nunca ficar com chave nula.
 
+-- MAGIC
+-- MAGIC ## Carga incremental de tipos
+-- MAGIC
+-- MAGIC O primeiro `INSERT` garante o membro desconhecido `-1`. A carga seguinte seleciona os tipos distintos não nulos da Silver e usa `LEFT ANTI JOIN` para inserir somente descrições que ainda não existem na dimensão. Tipos já carregados não recebem nova chave a cada execução.
+
 -- COMMAND ----------
 
 CREATE TABLE IF NOT EXISTS fiap_analytics.gold.dim_geosampa_type_flooding_events (

@@ -4,6 +4,13 @@
 -- MAGIC
 -- MAGIC Recria a tabela de subprefeituras de São Paulo com os agrupamentos do Anexo IX (ata 41/14). A coluna `sg_subprefeitura_geosampa` traz a sigla usada nas ocorrências do GeoSampa.
 
+-- MAGIC
+-- MAGIC ## Estrutura e manutenção
+-- MAGIC
+-- MAGIC O DDL recria a tabela Bronze e declara `sg_subprefeitura` como chave primária informativa no Unity Catalog. Os valores da relação do Anexo IX ficam no bloco `VALUES` abaixo; `sg_subprefeitura_geosampa` faz a correspondência com as siglas históricas usadas nos arquivos de ocorrências.
+-- MAGIC
+-- MAGIC `ds_arquivo_origem` registra a referência documental da relação e `dt_carga` recebe o instante da execução. Ao atualizar a lista, mantenha uma linha por sigla oficial e preserve a correspondência histórica necessária para os joins da Silver.
+
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE fiap_analytics.bronze.geosampa_subprefecture_area (

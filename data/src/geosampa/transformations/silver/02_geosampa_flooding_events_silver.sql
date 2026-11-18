@@ -6,6 +6,15 @@
 -- MAGIC
 -- MAGIC Localização: a Bronze guarda a geometria em WKB (`geom_wkb`), um POINT ou POINT Z (varia conforme o ano do arquivo) em SIRGAS 2000 / UTM 23S (`_source_srs_id = 31983`, lido dos metadados do GeoPackage). A Silver mantém o WKB e acrescenta as coordenadas UTM (metros, boas para calcular distâncias) e a latitude e longitude em graus (SIRGAS 2000, equivalente ao WGS84 para este uso).
 
+-- MAGIC %md
+-- MAGIC ## Conversão do ponto WKB
+-- MAGIC
+-- MAGIC O código Python abaixo registra `geosampa_ponto_coordenadas` como UDF para que o Spark SQL possa aplicar a conversão a cada geometria. A função auxiliar `utm23s_para_latlon(x, y)` implementa a inversão da projeção UTM zona 23S usando os parâmetros do elipsoide GRS80 definidos no notebook.
+-- MAGIC
+-- MAGIC `ponto_wkb_para_coordenadas(wkb, srs_id)` valida o valor binário e o SRID, interpreta o tipo e a ordem dos bytes do WKB/EWKB e lê as duas primeiras coordenadas. Pontos vazios, geometria nula, tipo diferente de POINT ou SRID diferente de 31983 retornam `None`. Valores Z e M são ignorados. O retorno é um struct com coordenadas UTM, latitude e longitude.
+-- MAGIC
+-- MAGIC A UDF preserva a geometria original: a tabela Silver grava `geom_wkb` e acrescenta os valores derivados. A consulta ao final do notebook resume ocorrências sem coordenadas, fora do envelope municipal e pontos distintos para conferência.
+
 -- COMMAND ----------
 
 -- MAGIC %python
