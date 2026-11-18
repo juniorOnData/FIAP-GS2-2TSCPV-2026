@@ -1,0 +1,39 @@
+# Execução manual dos modelos experimentais. Não é dependência do job público de dados
+# e não envia previsões ao site nem produz alertas.
+resources:
+  jobs:
+    ChuvaSegura_ML:
+      name: ChuvaSegura-ML
+      tasks:
+        - task_key: create_ml_schema
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ml/00_create_schema
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: spatial_recurrence
+          depends_on:
+            - task_key: create_ml_schema
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ml/01_spatial_recurrence
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: sibh_level_forecast
+          depends_on:
+            - task_key: create_ml_schema
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ml/02_sibh_level_forecast
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: rainfall_nowcast
+          depends_on:
+            - task_key: create_ml_schema
+          notebook_task:
+            notebook_path: /Workspace/Users/rm562679@fiap.com.br/FIAP-GS2-2TSCPV-2026/data/src/ml/03_rainfall_nowcast
+            source: WORKSPACE
+          environment_key: Default
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "6"
