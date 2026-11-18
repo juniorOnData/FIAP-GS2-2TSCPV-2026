@@ -242,3 +242,41 @@ def area_uniao_por_grau(itens, passo_m=10.0):
         area[grau] = total - anterior
         anterior = total
     return area
+
+
+def _dist_segmento(px, py, a, b):
+    (ax, ay), (bx, by) = a, b
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    t = 0.0 if l2 == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+
+class IndiceLinhas:
+    """Distância (m) de um ponto à linha mais próxima. Os segmentos ficam numa grade de `celula_m` metros, e a busca
+    anda em anéis de células a partir do ponto, parando quando o anel seguinte já não pode ter nada mais perto.
+    linhas: [[(lon, lat), ...], ...] (cursos d'água, ou contornos de corpos d'água)."""
+
+    def __init__(self, linhas, celula_m=250.0):
+        self.celula = celula_m
+        self.grade = defaultdict(list)
+        for linha in linhas:
+            m = [(x * M_POR_GRAU_LON, y * M_POR_GRAU_LAT) for x, y in linha]
+            for a, b in zip(m, m[1:]):
+                for cx in range(math.floor(min(a[0], b[0]) / celula_m), math.floor(max(a[0], b[0]) / celula_m) + 1):
+                    for cy in range(math.floor(min(a[1], b[1]) / celula_m), math.floor(max(a[1], b[1]) / celula_m) + 1):
+                        self.grade[(cx, cy)].append((a, b))
+
+    def distancia(self, lon, lat, maximo_m):
+        """Distância em metros, ou None se não houver linha até `maximo_m`."""
+        x, y = lon * M_POR_GRAU_LON, lat * M_POR_GRAU_LAT
+        cx, cy = math.floor(x / self.celula), math.floor(y / self.celula)
+        melhor = math.inf
+        for k in range(math.ceil(maximo_m / self.celula) + 1):
+            celulas = [(cx + i, cy + j) for i in range(-k, k + 1) for j in range(-k, k + 1) if max(abs(i), abs(j)) == k]
+            for c in celulas:
+                for a, b in self.grade.get(c, ()):
+                    melhor = min(melhor, _dist_segmento(x, y, a, b))
+            if melhor <= k * self.celula:
+                break
+        return melhor if melhor <= maximo_m else None

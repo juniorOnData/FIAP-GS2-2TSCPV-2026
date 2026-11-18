@@ -79,6 +79,7 @@ export async function getOccurrences() {
       lat: c.lat[i],
       lon: c.lon[i],
       grau: c.grau_susc_inundacao[i],
+      dist: c.dist_agua_m ? c.dist_agua_m[i] : null,
     }));
   }
   return { ...r, rows: occCache };

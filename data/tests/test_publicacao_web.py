@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from common import github_publish  # noqa: E402
 from common.publicacao_web import (  # noqa: E402
-    FATOR_PARA_METRO, M_POR_GRAU_LAT, M_POR_GRAU_LON, TZ_SP, IndicePoligonos, anel_web, area_uniao_por_grau, linhas_web,
+    FATOR_PARA_METRO, M_POR_GRAU_LAT, M_POR_GRAU_LON, TZ_SP, IndiceLinhas, IndicePoligonos, anel_web, area_uniao_por_grau, linhas_web,
     poligonos_web, simplificar, data_para_cod, hora_sp, iso_sp, pior_qualidade, serie_diaria, serie_horaria, sha256_dados,
 )
 
@@ -119,6 +119,18 @@ class GeometriaTest(unittest.TestCase):
         area = area_uniao_por_grau([(1, a), (1, b), (3, alta)], passo_m=5.0)
         self.assertAlmostEqual(area[3], 0.25, places=2)
         self.assertAlmostEqual(area[1], 1.5 - 0.25, places=2)
+
+    def test_distancia_ate_a_linha_mais_proxima(self):
+        rio = [(self.X, self.Y), (self.X + 2000 / M_POR_GRAU_LON, self.Y)]  # 2 km para leste
+        ind = IndiceLinhas([rio])
+        self.assertAlmostEqual(ind.distancia(self.X + 1000 / M_POR_GRAU_LON, self.Y + 120 / M_POR_GRAU_LAT, 500), 120, delta=0.5)
+        self.assertAlmostEqual(ind.distancia(self.X - 300 / M_POR_GRAU_LON, self.Y, 500), 300, delta=0.5)  # além da ponta
+        self.assertIsNone(ind.distancia(self.X + 1000 / M_POR_GRAU_LON, self.Y + 800 / M_POR_GRAU_LAT, 500))
+
+    def test_distancia_escolhe_a_mais_perto_entre_varias(self):
+        perto = [(self.X, self.Y + 50 / M_POR_GRAU_LAT), (self.X + 0.001, self.Y + 50 / M_POR_GRAU_LAT)]
+        longe = [(self.X, self.Y + 400 / M_POR_GRAU_LAT), (self.X + 0.001, self.Y + 400 / M_POR_GRAU_LAT)]
+        self.assertAlmostEqual(IndiceLinhas([longe, perto]).distancia(self.X + 0.0005, self.Y, 500), 50, delta=0.5)
 
     def test_area_uniao_desconta_buraco(self):
         pol = [[quadrado(self.X, self.Y, 1000), quadrado(self.X + 0.002, self.Y + 0.002, 500)]]

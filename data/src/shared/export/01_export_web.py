@@ -21,7 +21,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("inicio_execucao", "", "Início do job (ISO 8601); vazio = última qualidade")
-dbutils.widgets.text("fontes", "geosampa,cemaden,sibh,inmet,sgb,ibge,osm", "Fontes a exportar")
+dbutils.widgets.text("fontes", "geosampa,cemaden,sibh,inmet,sgb,ibge,osm,hidrografia", "Fontes a exportar")
 dbutils.widgets.dropdown("github_publicar", "sim", ["sim", "nao"], "Enviar ao GitHub")
 dbutils.widgets.text("github_repo", "juniorOnData/FIAP-GS2-2TSCPV-2026", "Repositório (dono/nome)")
 dbutils.widgets.text("github_branch", "main", "Branch de produção da Vercel")
@@ -46,7 +46,7 @@ if _src not in sys.path:
     sys.path.append(_src)
 from common import geo, github_publish  # noqa: E402
 from common.publicacao_web import (  # noqa: E402
-    DIA_INICIAL, DIAS_NIVEL, FATOR_PARA_METRO, IndicePoligonos, area_uniao_por_grau, cod_para_data, data_para_cod, hora_sp, iso_sp, json_bytes,
+    DIA_INICIAL, DIAS_NIVEL, FATOR_PARA_METRO, IndiceLinhas, IndicePoligonos, area_uniao_por_grau, cod_para_data, data_para_cod, hora_sp, iso_sp, json_bytes,
     linhas_web, pior_qualidade, poligonos_web, serie_diaria, serie_horaria, sha256_dados,
 )
 
@@ -63,7 +63,7 @@ AGORA_DT = datetime.now(ZoneInfo("America/Sao_Paulo"))
 AGORA = AGORA_DT.isoformat(timespec="seconds")
 INICIO_EXECUCAO = dbutils.widgets.get("inicio_execucao").strip()
 FONTES = {f.strip().lower() for f in dbutils.widgets.get("fontes").split(",") if f.strip()}
-DESCONHECIDAS = FONTES - {"geosampa", "cemaden", "sibh", "inmet", "sgb", "ibge", "osm"}
+DESCONHECIDAS = FONTES - {"geosampa", "cemaden", "sibh", "inmet", "sgb", "ibge", "osm", "hidrografia"}
 if DESCONHECIDAS:
     raise ValueError(f"Fontes desconhecidas em 'fontes': {sorted(DESCONHECIDAS)}")
 GITHUB_PUBLICAR = dbutils.widgets.get("github_publicar") == "sim"
@@ -75,6 +75,8 @@ ENVELOPE = (-24.1, -23.3, -47.0, -46.3)  # lat mín, lat máx, lon mín, lon má
 # Simplificação das geometrias (Douglas-Peucker, em metros): abaixo de ~1 pixel no zoom em que cada camada é lida.
 TOLERANCIA_SUSC_M = 5
 TOLERANCIA_LIMITE_M = 15
+TOLERANCIA_AGUA_M = 10
+DIST_AGUA_MAX_M = 500  # além disso, a distância da ocorrência ao curso d'água fica nula
 TOLERANCIA_SETOR_M = 8
 TOLERANCIA_VIA_M = 8
 HIERARQUIA_VIAS_MAX = 5  # vias expressas a coletoras e seus acessos; ruas locais, serviço e trilhas ficam de fora
@@ -259,6 +261,66 @@ def exportar_sgb():
 # COMMAND ----------
 
 
+def exportar_hidrografia():
+    """hidrografia.json (cursos e corpos d'água do OSM) e a função de distância usada nas ocorrências."""
+    qualidade = qualidade_gold("osm_agua")
+    fonte = {"id": "osm", "nome": "OpenStreetMap (Geofabrik)", "url": "https://www.openstreetmap.org/copyright"}
+    dims = {"cursos": f"{CATALOG}.gold.dim_osm_waterways", "corpos": f"{CATALOG}.gold.dim_osm_water_areas"}
+    dados, linhas_dist, poligonos_agua = {}, [], []
+    for chave, tabela in dims.items():
+        medida = "NUM_COMPRIMENTO_KM" if chave == "cursos" else "NUM_AREA_KM2"
+        col = {k: [] for k in ("id", "nome", "classe", "km" if chave == "cursos" else "area_km2", "geometria")}
+        for r in spark.table(tabela).orderBy("NUM_OSM_ID").toLocalIterator():
+            g = geo.de_wkb(r["GEO_WKB"])
+            if not g:
+                continue
+            web = linhas_web(g, TOLERANCIA_AGUA_M) if chave == "cursos" else poligonos_web(g, TOLERANCIA_AGUA_M)
+            if not web:
+                continue
+            col["id"].append(r["NUM_OSM_ID"])
+            col["nome"].append(r["NOM_HIDRO"])
+            col["classe"].append(r["DSC_CLASSE"])
+            col["km" if chave == "cursos" else "area_km2"].append(None if r[medida] is None else round(r[medida], 3))
+            col["geometria"].append(web)
+            if chave == "cursos":
+                linhas_dist += geo.linhas(g)
+            else:
+                pols = [pol for pol in geo.poligonos(g) if pol]
+                poligonos_agua.append((1, pols))
+                linhas_dist += [anel for pol in pols for anel in pol]
+        if not col["id"]:
+            raise RuntimeError(f"{tabela} não tem feições com geometria.")
+        dados[chave] = col
+    indice_linhas = IndiceLinhas(linhas_dist)
+    indice_corpos = IndicePoligonos(poligonos_agua)
+
+    def distancia(lon, lat):
+        if indice_corpos.maior_valor(lon, lat):
+            return 0
+        d = indice_linhas.distancia(lon, lat, DIST_AGUA_MAX_M)
+        return None if d is None else round(d)
+
+    km = sum(v or 0 for v in dados["cursos"]["km"])
+    meta = dataset_meta(
+        "hidrografia", "Hidrografia (OpenStreetMap)", "colaborativo", fonte,
+        "© colaboradores do OpenStreetMap, ODbL 1.0: exige atribuição; base derivada distribuída fica sob a ODbL.",
+        list(dims.values()), len(dados["cursos"]["id"]) + len(dados["corpos"]["id"]), qualidade,
+        granularidade={"espacial": "curso e corpo d'água (way do OSM)", "temporal": "extrato da Geofabrik"},
+        extra={"km_cursos": round(km, 1), "simplificacao_m": TOLERANCIA_AGUA_M,
+               "observacao": "Em São Paulo muitos córregos correm canalizados ou sob avenidas, e o OpenStreetMap os mapeia de forma "
+                             "desigual: a ausência de um curso d'água no mapa não quer dizer que ele não exista."},
+    )
+    corpo, entrada = pacote("hidrografia.json", meta, dados)
+    print(f"Hidrografia: {len(dados['cursos']['id'])} cursos ({km:.0f} km) e {len(dados['corpos']['id'])} corpos d'água "
+          f"({len(corpo) / 1024 / 1024:.1f} MB); qualidade {qualidade['estado']}")
+    return {
+        "arquivos": {"hidrografia.json": corpo}, "datasets": [entrada],
+        "linhagem": [{"fonte": "OpenStreetMap (hidrografia)", "tabelas": ["bronze.osm_waterways", "bronze.osm_water_areas", "gold.dim_osm_waterways", "gold.dim_osm_water_areas"],
+                      "publicado_na_web": True, "processado_em": AGORA, "qualidade": qualidade["estado"], "avisos": qualidade["avisos"]}],
+        "distancia": distancia,
+    }
+
+
 LIMITES = f"{CATALOG}.gold.dim_geosampa_subprefecture_limits"
 INDICE_SUBPREF = None  # preenchido pelo export do GeoSampa; usado para dar subprefeitura às estações
 MOTIVO_SEM_LIMITES = None
@@ -296,8 +358,9 @@ def exportar_limites(fonte, licenca, qualidade):
     return corpo, entrada
 
 
-def exportar_geosampa(indice_susc=None):
-    """indice_susc: áreas de inundação do SGB (IndicePoligonos), ou None se o SGB não foi exportado."""
+def exportar_geosampa(indice_susc=None, dist_agua=None):
+    """indice_susc: áreas de inundação do SGB (IndicePoligonos), ou None se o SGB não foi exportado.
+    dist_agua: função (lon, lat) -> metros até o curso ou corpo d'água mais próximo, ou None se a hidrografia não foi exportada."""
     fato = f"{CATALOG}.gold.fact_geosampa_flooding_events"
     dim_tipo = f"{CATALOG}.gold.dim_geosampa_type_flooding_events"
     dim_sp = f"{CATALOG}.gold.dim_geosampa_subprefecture_area"
@@ -336,6 +399,8 @@ def exportar_geosampa(indice_susc=None):
     colunas["grau_susc_inundacao"] = (
         [indice_susc.maior_valor(lon, lat) for lon, lat in zip(colunas["lon"], colunas["lat"])] if indice_susc
         else [None] * len(colunas["id"]))
+    colunas["dist_agua_m"] = ([dist_agua(lon, lat) for lon, lat in zip(colunas["lon"], colunas["lat"])] if dist_agua
+                              else [None] * len(colunas["id"]))
     if not colunas["id"]:
         raise RuntimeError("A Gold do GeoSampa não gerou ocorrências com data e coordenadas válidas.")
     descartadas = total_fato - len(colunas["id"])
@@ -357,7 +422,10 @@ def exportar_geosampa(indice_susc=None):
         extra={"unidade": "ocorrências", "registros_origem": total_fato, "registros_descartados": descartadas,
                "observacao": "A Gold do GeoSampa não informa hora do evento. " + (
                    "grau_susc_inundacao: maior grau das áreas de inundação do SGB que contêm o ponto (0 = fora delas)." if indice_susc
-                   else "grau_susc_inundacao fica nulo: o cruzamento com a carta do SGB não foi feito nesta publicação.")},
+                   else "grau_susc_inundacao fica nulo: o cruzamento com a carta do SGB não foi feito nesta publicação.") + (
+                   f" dist_agua_m: metros até o curso ou corpo d'água do OpenStreetMap mais próximo (0 = dentro de um corpo d'água; nula acima de {DIST_AGUA_MAX_M} m)."
+                   if dist_agua else " dist_agua_m fica nula: a hidrografia não foi exportada nesta publicação."),
+               "dist_agua_max_m": DIST_AGUA_MAX_M if dist_agua else None},
     )
     arq_sp, ent_sp = pacote("subprefeituras.json", meta_sp, subprefeituras)
     arq_oc, ent_oc = pacote("ocorrencias.json", meta_oc, colunas)
@@ -726,8 +794,15 @@ if "sgb" in FONTES:
         incluir(r, {"suscetibilidade"})
         indice_susc = r["indice"]
 
+dist_agua = None
+if "hidrografia" in FONTES:
+    r = tentar("hidrografia", exportar_hidrografia)
+    if r:
+        incluir(r, {"hidrografia"})
+        dist_agua = r["distancia"]
+
 if "geosampa" in FONTES:
-    r = tentar("geosampa", lambda: exportar_geosampa(indice_susc))
+    r = tentar("geosampa", lambda: exportar_geosampa(indice_susc, dist_agua))
     if r:
         arquivos.update(r["arquivos"])
         datasets += r["datasets"]
@@ -793,7 +868,7 @@ FONTES_DO_CONJUNTO = {
     "subprefeituras": ("geosampa",), "ocorrencias": ("geosampa",), "limites": ("geosampa", "limites"),
     "chuva_diaria": ("chuva", "cemaden", "sibh", "inmet"), "chuva_horaria": ("chuva", "cemaden", "sibh", "inmet"),
     "estacoes": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh", "chuva"),
-    "suscetibilidade": ("sgb",), "setores": ("ibge",), "vias": ("osm",),
+    "suscetibilidade": ("sgb",), "setores": ("ibge",), "vias": ("osm",), "hidrografia": ("hidrografia",),
 }
 token = dbutils.secrets.get(scope="github", key="token") if GITHUB_PUBLICAR else None
 atual = github_publish.ler_json(token, GITHUB_REPO, GITHUB_BRANCH, f"{PASTA_SITE}/manifest.json") if token else None
@@ -811,7 +886,7 @@ CATALOGO_NAO_PUBLICADO = [
     ("chuva", "Chuva observada", "chuva_diaria"), ("nivel", "Nível de rios e córregos", "nivel"),
     ("suscetibilidade", "Suscetibilidade a inundações", "suscetibilidade"), ("avisos_oficiais", "Avisos oficiais", None),
     ("limites", "Limites administrativos", "limites"), ("setores", "Setores censitários (IBGE)", "setores"),
-    ("vias", "Rede viária (OpenStreetMap)", "vias"),
+    ("vias", "Rede viária (OpenStreetMap)", "vias"), ("hidrografia", "Hidrografia (OpenStreetMap)", "hidrografia"),
 ]
 MOTIVOS_FIXOS = {
     "avisos_oficiais": "Nenhuma fonte de avisos está integrada ao pipeline.",
@@ -824,7 +899,7 @@ for id_, titulo, ds in CATALOGO_NAO_PUBLICADO:
         motivo = MOTIVOS_FIXOS[id_]
     else:
         fontes_rel = {"chuva": ("chuva", "cemaden", "sibh", "inmet"), "nivel": ("nivel", "sibh"), "suscetibilidade": ("sgb",), "limites": ("geosampa", "limites"),
-                      "setores": ("ibge",), "vias": ("osm",)}[id_]
+                      "setores": ("ibge",), "vias": ("osm",), "hidrografia": ("hidrografia",)}[id_]
         erros = [f"{n}: {MOTIVO_FALHA[n]}" for n in fontes_rel if n in MOTIVO_FALHA]
         motivo = (("Falhou nesta execução (" + "; ".join(erros) + ").") if erros
                   else MOTIVO_SEM_LIMITES if id_ == "limites" and MOTIVO_SEM_LIMITES else "Fonte não incluída nesta publicação.")
