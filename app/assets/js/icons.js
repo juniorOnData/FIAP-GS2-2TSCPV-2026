@@ -39,7 +39,26 @@ const P = {
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
   crosshair: '<circle cx="12" cy="12" r="8"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  // tipos de ocorrência e hidrografia (também desenhados no mapa, ver glyphPaths)
+  arvore: '<path d="M12 3 6.5 10.5h3L5 16h14l-4.5-5.5h3z"/><path d="M12 16v5"/>',
+  alagamento: '<path d="M12 3c-1.8 2.6-3.2 4.5-3.2 6a3.2 3.2 0 0 0 6.4 0c0-1.5-1.4-3.4-3.2-6z"/><path d="M3 16.5c1.5-1 3-1 4.5 0s3 1 4.5 0 3-1 4.5 0 3 1 4.5 0"/><path d="M3 20.5c1.5-1 3-1 4.5 0s3 1 4.5 0 3-1 4.5 0 3 1 4.5 0"/>',
+  inundacao: '<path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v5h11v-5"/><path d="M2 19c1.7-1.2 3.3-1.2 5 0s3.3 1.2 5 0 3.3-1.2 5 0 3.3 1.2 5 0"/>',
+  deslizamento: '<path d="M3 20h18"/><path d="M3 20 9 7l6.5 8.5"/><circle cx="17" cy="9.5" r="2"/><circle cx="19.5" cy="15" r="1.5"/>',
+  rio: '<path d="M3 7c2.5 0 3 2 6 2s3.5-2 6-2 3.5 2 6 2"/><path d="M3 12c2.5 0 3 2 6 2s3.5-2 6-2 3.5 2 6 2"/><path d="M3 17c2.5 0 3 2 6 2s3.5-2 6-2 3.5 2 6 2"/>',
 };
+
+export const TIPO_ICONE = { "Queda de Árvore": "arvore", Alagamento: "alagamento", Inundação: "inundacao", Deslizamento: "deslizamento" };
+
+// Traçados de um ícone como dados de Path2D (círculos viram dois arcos), para desenhar o mesmo ícone em canvas.
+export function glyphPaths(name) {
+  const svg = P[name] || "";
+  const paths = [...svg.matchAll(/d="([^"]+)"/g)].map((m) => m[1]);
+  for (const m of svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/g)) {
+    const [cx, cy, r] = m.slice(1).map(Number);
+    paths.push(`M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`);
+  }
+  return paths;
+}
 
 export const icon = (name, cls = "") =>
   `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${P[name] || P.info}</svg>`;
